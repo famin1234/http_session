@@ -140,7 +140,6 @@ static void http_server_close(struct http_session_t *http_session, int err);
 
 static void http_session_close(struct http_session_t *http_session);
 
-
 int http_session_init()
 {
     net_listen_list_add("0.0.0.0", 8080, http_session_accept);

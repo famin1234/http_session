@@ -140,7 +140,6 @@ static void http_server_close(struct http_session_t *http_session, int err);
 
 static void http_session_close(struct http_session_t *http_session);
 
-
 int http_session_init()
 {
     net_listen_list_add("0.0.0.0", 8080, http_session_accept);
@@ -1198,18 +1197,18 @@ static void http_server_keepalive_timeout(struct conn_t *conn)
 static void http_server_keepalive_read(struct conn_t *conn)
 {
     char buf[PAGE_SIZE];
-    int n;
+    ssize_t n;
 
     n = read(conn->sock, buf, sizeof(buf));
     if (n > 0) {
-        LOG(LOG_DEBUG, "sock=%d read=%d\n", conn->sock, n);
+        LOG(LOG_DEBUG, "sock=%d read=%zd\n", conn->sock, n);
         conn_keepalive_unset(conn);
         conn_close(conn);
     } else if(n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
         conn_ready_unset(conn, CONN_READ);
         conn_enable(conn, CONN_READ);
     } else {
-        LOG(LOG_ERROR, "sock=%d read=%d error:%s\n", conn->sock, n, strerror(errno));
+        LOG(LOG_ERROR, "sock=%d read=%zd error:%s\n", conn->sock, n, strerror(errno));
         conn_keepalive_unset(conn);
         conn_close(conn);
     }
@@ -1221,11 +1220,11 @@ static void http_server_keepalive(struct http_session_t *http_session)
     struct conn_t *conn = http_server->conn;
     char str[64];
     char buf[PAGE_SIZE];
-    int n;
+    ssize_t n;
 
     n = read(conn->sock, buf, sizeof(buf));
     if (n > 0) {
-        LOG(LOG_ERROR, "url=%s sock=%d read=%d\n", string_buf(&http_session->url), conn->sock, n);
+        LOG(LOG_ERROR, "url=%s sock=%d read=%zd\n", string_buf(&http_session->url), conn->sock, n);
         conn_close(conn);
     } else if(n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
         conn_ready_unset(conn, CONN_READ);
@@ -1241,7 +1240,7 @@ static void http_server_keepalive(struct http_session_t *http_session)
             conn_enable(conn, CONN_READ);
         }
     } else {
-        LOG(LOG_ERROR, "url=%s sock=%d read=%d error:%s\n", string_buf(&http_session->url), conn->sock, n, strerror(errno));
+        LOG(LOG_ERROR, "url=%s sock=%d read=%zd error:%s\n", string_buf(&http_session->url), conn->sock, n, strerror(errno));
         conn_close(conn);
     }
 }

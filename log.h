@@ -12,5 +12,6 @@ void log_file_close();
 void log_thread_name(const char *name);
 void log_printf(int level, const char *file, int line, const char *function, const char *fmt, ...);
 #define LOG(level, ...) log_printf(level, __FILE__, __LINE__, __FUNCTION__, __VA_ARGS__)
+//#define LOG(level, ...) printf(__VA_ARGS__)
 
 #endif

@@ -452,18 +452,18 @@ static void net_thread_pipe_read(struct conn_t *conn)
 {
     struct net_thread_t *net_thread = conn->net_thread;
     char buf[4096];
-    int n;
+    ssize_t n;
 
     n = read(conn->sock, buf, sizeof(buf));
     if (n > 0) {
-        LOG(LOG_DEBUG, "sock=%d read=%d\n", conn->sock, n);
+        LOG(LOG_DEBUG, "sock=%d read=%zd\n", conn->sock, n);
         conn_enable(conn, CONN_READ);
     } else if(n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
         net_thread->signaled = 0;
         conn_ready_unset(conn, CONN_READ);
         conn_enable(conn, CONN_READ);
     } else {
-        LOG(LOG_ERROR, "sock=%d read=%d error: %s\n", conn->sock, n, strerror(errno));
+        LOG(LOG_ERROR, "sock=%d read=%zd error: %s\n", conn->sock, n, strerror(errno));
     }
 }
 

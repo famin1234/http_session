@@ -1237,6 +1237,7 @@ static void http_server_keepalive(struct http_session_t *http_session)
             conn->handle_write = NULL;
             conn->handle_timeout = http_server_keepalive_timeout;
             conn_timer_set(conn, HTTP_SERVER_TIMEOUT);
+            conn_disable(conn, CONN_WRITE);
             conn_enable(conn, CONN_READ);
         }
     } else {

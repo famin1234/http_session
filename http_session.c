@@ -65,7 +65,7 @@ struct http_server_t {
         int proxy:1;
         int chunked:1;
         int keepalive:1;
-    } flag;
+    } flags;
     struct http_parser_url url_parser;
     struct http_header_t header;
     struct http_header_parser_t header_parser;
@@ -85,7 +85,7 @@ struct http_session_t {
     struct {
         int transparent:1;
         int keepalive:1;
-    } flag;
+    } flags;
     struct http_header_t header;
     struct http_header_parser_t header_parser;
     size_t header_recv;
@@ -249,7 +249,7 @@ static void http_client_header_process(struct http_session_t *http_session, cons
         string_init(&request, PAGE_SIZE);
         http_header_print(&http_session->header, HTTP_REQUEST, &request);
         if (string_buf(&http_session->url)[0] == '/') {
-            http_session->flag.transparent = 1;
+            http_session->flags.transparent = 1;
             value = http_header_find(&http_session->header, "Host");
             if (value) {
                 string_init(&url, URL_LEN);
@@ -275,7 +275,7 @@ static void http_client_header_process(struct http_session_t *http_session, cons
             http_session->post_end = INT64_MAX;
         }
         if (http_session->header.http_major >= 1 && http_session->header.http_minor >= 1) {
-            http_session->flag.keepalive = 1;
+            http_session->flags.keepalive = 1;
         }
         value = http_header_find(&http_session->header, "Proxy-Connection");
         if (!value) {
@@ -283,12 +283,12 @@ static void http_client_header_process(struct http_session_t *http_session, cons
         }
         if (value) {
             if (strcasecmp(value, "Keep-Alive") == 0) {
-                http_session->flag.keepalive = 1;
+                http_session->flags.keepalive = 1;
             } else {
-                http_session->flag.keepalive = 0;
+                http_session->flags.keepalive = 0;
             }
         }
-        LOG(LOG_DEBUG, "url=%s sock=%d keepalive=%d\n", string_buf(&http_session->url), conn->sock, http_session->flag.keepalive ? 1 : 0);
+        LOG(LOG_DEBUG, "url=%s sock=%d keepalive=%d\n", string_buf(&http_session->url), conn->sock, http_session->flags.keepalive ? 1 : 0);
     } else if (http_session->header_parser.http_parser.http_errno == HPE_OK) {
         LOG(LOG_DEBUG, "url=%s sock=%d len=%zu nparse=%zu header_recv=%zu continue\n", string_buf(&http_session->url), conn->sock, len, nparse, http_session->header_recv);
         assert(nparse == len);
@@ -427,14 +427,14 @@ static void http_client_build_response(struct http_session_t *http_session, int 
             assert(0);
             break;
     }
-    if (http_session->flag.keepalive) {
-        if (http_session->flag.transparent) {
+    if (http_session->flags.keepalive) {
+        if (http_session->flags.transparent) {
             string_strcat(&http_session->response, "Connection: keep-alive\r\n");
         } else {
             string_strcat(&http_session->response, "Proxy-Connection: keep-alive\r\n");
         }
     } else {
-        if (http_session->flag.transparent) {
+        if (http_session->flags.transparent) {
             string_strcat(&http_session->response, "Connection: close\r\n");
         } else {
             string_strcat(&http_session->response, "Proxy-Connection: close\r\n");
@@ -596,7 +596,7 @@ static void http_client_close(struct http_session_t *http_session, int err)
     struct conn_t *conn = http_session->conn;
     LOG(LOG_INFO, "url=%s sock=%d body_size=%"PRId64" err=%d\n",
             string_buf(&http_session->url), conn->sock, http_session->body_send - http_session->body_start, err);
-    if (!err && http_session->flag.keepalive) {
+    if (!err && http_session->flags.keepalive) {
         http_client_keepalive(http_session);
     } else {
         conn_close(conn);
@@ -807,7 +807,7 @@ static void http_server_build_request(struct http_session_t *http_session)
 
     assert(string_size(&http_server->request) == 0);
     string_init(&http_server->request, PAGE_SIZE);
-    if (http_server->flag.proxy) {
+    if (http_server->flags.proxy) {
         uri = string_buf(&http_session->url);
     } else {
         uri = string_buf(&http_session->url) + http_server->url_parser.field_data[UF_PATH].off;
@@ -830,13 +830,13 @@ static void http_server_build_request(struct http_session_t *http_session)
         string_sprint(&http_server->request, "Range: bytes=%"PRId64"-%"PRId64"\r\n", http_session->body_high, http_session->body_end - 1);
     }
     if (1) {
-        if (http_server->flag.proxy) {
+        if (http_server->flags.proxy) {
             string_strcat(&http_server->request, "Proxy-Connection: keep-alive\r\n");
         } else {
             string_strcat(&http_server->request, "Connection: keep-alive\r\n");
         }
     } else {
-        if (http_server->flag.proxy) {
+        if (http_server->flags.proxy) {
             string_strcat(&http_server->request, "Proxy-Connection: close\r\n");
         } else {
             string_strcat(&http_server->request, "Connection: close\r\n");
@@ -994,7 +994,7 @@ static void http_server_header_process(struct http_session_t *http_session, cons
             http_server->body_end = INT64_MAX;
         }
         if (http_server->header.http_major >= 1 && http_server->header.http_minor >= 1) {
-            http_server->flag.keepalive = 1;
+            http_server->flags.keepalive = 1;
         }
         value = http_header_find(&http_server->header, "Proxy-Connection");
         if (!value) {
@@ -1002,12 +1002,12 @@ static void http_server_header_process(struct http_session_t *http_session, cons
         }
         if (value) {
             if (strcasecmp(value, "Keep-Alive") == 0) {
-                http_server->flag.keepalive = 1;
+                http_server->flags.keepalive = 1;
             } else {
-                http_server->flag.keepalive = 0;
+                http_server->flags.keepalive = 0;
             }
         }
-        LOG(LOG_DEBUG, "url=%s sock=%d keepalive=%d\n", string_buf(&http_session->url), conn->sock, http_server->flag.keepalive ? 1 : 0);
+        LOG(LOG_DEBUG, "url=%s sock=%d keepalive=%d\n", string_buf(&http_session->url), conn->sock, http_server->flags.keepalive ? 1 : 0);
     } else if (http_server->header_parser.http_parser.http_errno == HPE_OK) {
         LOG(LOG_DEBUG, "url=%s sock=%d len=%zu nparse=%zu header_recv=%zu continue\n", string_buf(&http_session->url), conn->sock, len, nparse, http_server->header_recv);
         assert(nparse == len);
@@ -1020,7 +1020,7 @@ static void http_server_header_process(struct http_session_t *http_session, cons
     }
     value = http_header_find(&http_server->header, "Transfer-Encoding");
     if (value && strcmp(value, "chunked") == 0) {
-        http_server->flag.chunked = 1;
+        http_server->flags.chunked = 1;
         http_server->body_end = INT64_MAX;
     } else {
         if (http_server->header.response.status_code == HTTP_STATUS_PARTIAL_CONTENT) {
@@ -1136,7 +1136,7 @@ static void http_server_body_process(struct http_session_t *http_session, const 
     size_t pos;
     size_t parse;
 
-    if (http_server->flag.chunked) {
+    if (http_server->flags.chunked) {
         parse = 0;
         do {
             chunked_len = len - parse;
@@ -1253,7 +1253,7 @@ static void http_server_close(struct http_session_t *http_session, int err)
     LOG(LOG_INFO, "url=%s sock=%d body_size=%"PRId64" err=%d\n",
             string_buf(&http_session->url), conn?conn->sock:-1, http_session->body_high - http_server->body_start, err);
     if (conn) {
-        if (!err && http_server->flag.keepalive) {
+        if (!err && http_server->flags.keepalive) {
             http_server_keepalive(http_session);
         } else {
             conn_close(conn);

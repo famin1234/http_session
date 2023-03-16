@@ -157,8 +157,8 @@ void conn_close(struct conn_t *conn)
     conn_disable(conn, CONN_READ | CONN_WRITE);
     conn_timer_unset(conn);
     close(conn->sock);
-    if (conn->flag.lock) {
-        conn->flag.closed = 1;
+    if (conn->flags.lock) {
+        conn->flags.closed = 1;
     } else {
         conn_free(conn);
     }
@@ -178,43 +178,43 @@ struct conn_t *conn_socket(int domain, int type, int protocol)
 
 int conn_nonblock(struct conn_t *conn)
 {
-    int flags, r;
-    while ((flags = fcntl(conn->sock, F_GETFL, 0)) == -1 && errno == EINTR);
-    if (flags == -1) {
+    int flagss, r;
+    while ((flagss = fcntl(conn->sock, F_GETFL, 0)) == -1 && errno == EINTR);
+    if (flagss == -1) {
         return -1;
     }
-    while ((r = fcntl(conn->sock, F_SETFL, flags | O_NONBLOCK)) == -1 && errno == EINTR);
+    while ((r = fcntl(conn->sock, F_SETFL, flagss | O_NONBLOCK)) == -1 && errno == EINTR);
     if (r == -1) {
         return -1;
     }
     return 0;
 }
 
-void conn_enable(struct conn_t *conn, int flag)
+void conn_enable(struct conn_t *conn, int flags)
 {
     struct net_loop_t *net_loop = conn->net_loop;
     int err;
     uint32_t events;
 
     events = conn->events;
-    if (flag & CONN_READ) {
-        conn->flag.read_enable = 1;
-        if (conn->flag.read_ready) {
-            if (!conn->flag.in_ready_list) {
+    if (flags & CONN_READ) {
+        conn->flags.read_enable = 1;
+        if (conn->flags.read_ready) {
+            if (!conn->flags.in_ready_list) {
                 list_add_tail(&conn->ready_node, &net_loop->ready_list);
-                conn->flag.in_ready_list = 1;
+                conn->flags.in_ready_list = 1;
                 net_loop->ready_num++;
             }
         } else {
             events |= CONN_READ;
         }
     }
-    if (flag & CONN_WRITE) {
-        conn->flag.write_enable = 1;
-        if (conn->flag.write_ready) {
-            if (!conn->flag.in_ready_list) {
+    if (flags & CONN_WRITE) {
+        conn->flags.write_enable = 1;
+        if (conn->flags.write_ready) {
+            if (!conn->flags.in_ready_list) {
                 list_add_tail(&conn->ready_node, &net_loop->ready_list);
-                conn->flag.in_ready_list = 1;
+                conn->flags.in_ready_list = 1;
                 net_loop->ready_num++;
             }
         } else {
@@ -233,19 +233,19 @@ void conn_enable(struct conn_t *conn, int flag)
     }
 }
 
-void conn_disable(struct conn_t *conn, int flag)
+void conn_disable(struct conn_t *conn, int flags)
 {
     struct net_loop_t *net_loop = conn->net_loop;
     int err;
     uint32_t events;
 
     events = conn->events;
-    if (flag & CONN_READ) {
-        conn->flag.read_enable = 0;
+    if (flags & CONN_READ) {
+        conn->flags.read_enable = 0;
         events &= (~CONN_READ);
     }
-    if (flag & CONN_WRITE) {
-        conn->flag.write_enable = 0;
+    if (flags & CONN_WRITE) {
+        conn->flags.write_enable = 0;
         events &= (~CONN_WRITE);
     }
     if (events != conn->events) {
@@ -258,32 +258,32 @@ void conn_disable(struct conn_t *conn, int flag)
             conn->events = events;
         }
     }
-    if (conn->flag.read_enable == 0 && conn->flag.write_enable == 0) {
-        if (conn->flag.in_ready_list) {
+    if (conn->flags.read_enable == 0 && conn->flags.write_enable == 0) {
+        if (conn->flags.in_ready_list) {
             list_del(&conn->ready_node);
-            conn->flag.in_ready_list = 0;
+            conn->flags.in_ready_list = 0;
             net_loop->ready_num--;
         }
     }
 }
 
-void conn_ready_set(struct conn_t *conn, int flag)
+void conn_ready_set(struct conn_t *conn, int flags)
 {
-    if (flag & CONN_READ) {
-        conn->flag.read_ready = 1;
+    if (flags & CONN_READ) {
+        conn->flags.read_ready = 1;
     }
-    if (flag & CONN_WRITE) {
-        conn->flag.write_ready = 1;
+    if (flags & CONN_WRITE) {
+        conn->flags.write_ready = 1;
     }
 }
 
-void conn_ready_unset(struct conn_t *conn, int flag)
+void conn_ready_unset(struct conn_t *conn, int flags)
 {
-    if (flag & CONN_READ) {
-        conn->flag.read_ready = 0;
+    if (flags & CONN_READ) {
+        conn->flags.read_ready = 0;
     }
-    if (flag & CONN_WRITE) {
-        conn->flag.write_ready = 0;
+    if (flags & CONN_WRITE) {
+        conn->flags.write_ready = 0;
     }
 }
 
@@ -335,7 +335,7 @@ void conn_timer_set(struct conn_t *conn, int64_t timeout)
     int64_t expire;
 
     expire = net_loop->time_current + timeout;
-    if (conn->flag.timer_set) {
+    if (conn->flags.timer_set) {
         if (expire - conn->timer_expire >= TIMER_PERIOD) {
             conn->timer_expire = expire;
             rb_erase(&conn->timer_node, &net_loop->timer_root);
@@ -346,7 +346,7 @@ void conn_timer_set(struct conn_t *conn, int64_t timeout)
         if (conn_timer_insert(conn)) {
             assert(0);
         } else {
-            conn->flag.timer_set = 1;
+            conn->flags.timer_set = 1;
         }
     }
 }
@@ -355,9 +355,9 @@ void conn_timer_unset(struct conn_t *conn)
 {
     struct net_loop_t *net_loop = conn->net_loop;
 
-    if (conn->flag.timer_set) {
+    if (conn->flags.timer_set) {
         rb_erase(&conn->timer_node, &net_loop->timer_root);
-        conn->flag.timer_set = 0;
+        conn->flags.timer_set = 0;
     }
 }
 
@@ -501,18 +501,18 @@ int net_loop_event_wait(struct net_loop_t *net_loop)
     for (i = 0; i < nfds; i++) {
         conn = ees[i].data.ptr;
         if (ees[i].events & (EPOLLIN | EPOLLERR | EPOLLHUP)) {
-            conn->flag.read_ready = 1;
-            if (conn->flag.read_enable && !conn->flag.in_ready_list) {
+            conn->flags.read_ready = 1;
+            if (conn->flags.read_enable && !conn->flags.in_ready_list) {
                 list_add_tail(&conn->ready_node, &net_loop->ready_list);
-                conn->flag.in_ready_list = 1;
+                conn->flags.in_ready_list = 1;
                 net_loop->ready_num++;
             }
         }
         if (ees[i].events & (EPOLLOUT | EPOLLERR | EPOLLHUP)) {
-            conn->flag.write_ready = 1;
-            if (conn->flag.write_enable && !conn->flag.in_ready_list) {
+            conn->flags.write_ready = 1;
+            if (conn->flags.write_enable && !conn->flags.in_ready_list) {
                 list_add_tail(&conn->ready_node, &net_loop->ready_list);
-                conn->flag.in_ready_list = 1;
+                conn->flags.in_ready_list = 1;
                 net_loop->ready_num++;
             }
         }
@@ -629,17 +629,17 @@ void *net_loop_loop(void *data)
         while (!list_empty(&net_loop->ready_list) && loop++ < 100) {
             conn = d_list_head(&net_loop->ready_list, struct conn_t, ready_node);
             list_del(&conn->ready_node);
-            conn->flag.in_ready_list = 0;
+            conn->flags.in_ready_list = 0;
             net_loop->ready_num--;
-            conn->flag.lock = 1;
-            if (conn->flag.read_enable && conn->flag.read_ready) {
+            conn->flags.lock = 1;
+            if (conn->flags.read_enable && conn->flags.read_ready) {
                 conn->handle_read(conn);
             }
-            if (conn->flag.write_enable && conn->flag.write_ready) {
+            if (conn->flags.write_enable && conn->flags.write_ready) {
                 conn->handle_write(conn);
             }
-            conn->flag.lock = 0;
-            if (conn->flag.closed) {
+            conn->flags.lock = 0;
+            if (conn->flags.closed) {
                 conn_free(conn);
             }
         }

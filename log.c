@@ -11,7 +11,7 @@ void log_thread_name(const char *name)
 void log_printf(int level, const char *file, int line, const char *function, const char *fmt, ...)
 {
     if (level >= LOG_DEBUG) {
-        //return;
+        return;
     }
     va_list argptr;
     struct timeval tv;

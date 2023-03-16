@@ -6,13 +6,6 @@
 struct aio_t;
 typedef void (*aio_handle_t)(struct aio_t *);
 
-
-struct aio_list_t {
-    struct list_head_t list;
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
-};
-
 struct aio_loop_t {
     char name[64];
     int  exit;

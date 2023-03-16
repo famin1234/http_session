@@ -540,15 +540,15 @@ void net_loop_aio_add(struct aio_t *aio)
     struct net_loop_t *net_loop = aio->net_loop;
     struct conn_t *conn;
 
-    pthread_mutex_lock(&net_loop->done_mutex);
-    list_add_tail(&aio->node, &net_loop->done_list);
+    pthread_mutex_lock(&net_loop->aio_mutex);
+    list_add_tail(&aio->node, &net_loop->aio_list);
     if (net_loop->signaled) {
         conn = NULL;
     } else {
         net_loop->signaled = 1;
         conn = net_loop->conns[1];
     }
-    pthread_mutex_unlock(&net_loop->done_mutex);
+    pthread_mutex_unlock(&net_loop->aio_mutex);
     if (conn) {
         write(conn->sock, "1", 1);
     }
@@ -588,8 +588,8 @@ int net_loop_init(struct net_loop_t *net_loop)
         return -1;
     }
     INIT_LIST_HEAD(&net_loop->ready_list);
-    INIT_LIST_HEAD(&net_loop->done_list);
-    pthread_mutex_init(&net_loop->done_mutex, NULL);
+    INIT_LIST_HEAD(&net_loop->aio_list);
+    pthread_mutex_init(&net_loop->aio_mutex, NULL);
     net_loop->timer_root = RB_ROOT;
     net_loop->keepalive_root = RB_ROOT;
 
@@ -615,13 +615,13 @@ void *net_loop_loop(void *data)
 {
     struct net_loop_t *net_loop = data;
     int loop;
-    struct list_head_t done_list;
+    struct list_head_t aio_list;
     struct conn_t *conn;
     struct rb_node *rb_node;
     struct aio_t *aio;
 
     log_thread_name(net_loop->name);
-    INIT_LIST_HEAD(&done_list);
+    INIT_LIST_HEAD(&aio_list);
     while (1) {
         loop = 0;
         net_loop_event_wait(net_loop);
@@ -643,11 +643,11 @@ void *net_loop_loop(void *data)
                 conn_free(conn);
             }
         }
-        pthread_mutex_lock(&net_loop->done_mutex);
-        list_splice_init(&net_loop->done_list, &done_list);
-        pthread_mutex_unlock(&net_loop->done_mutex);
-        while (!list_empty(&done_list)) {
-            aio = d_list_head(&done_list, struct aio_t, node);
+        pthread_mutex_lock(&net_loop->aio_mutex);
+        list_splice_init(&net_loop->aio_list, &aio_list);
+        pthread_mutex_unlock(&net_loop->aio_mutex);
+        while (!list_empty(&aio_list)) {
+            aio = d_list_head(&aio_list, struct aio_t, node);
             list_del(&aio->node);
             aio_handle_done(aio);
         }
@@ -680,7 +680,7 @@ void net_loop_clean(struct net_loop_t *net_loop)
     conn_close(net_loop->conns[0]);
     conn_close(net_loop->conns[1]);
     net_loop_event_clean(net_loop);
-    pthread_mutex_destroy(&net_loop->done_mutex);
+    pthread_mutex_destroy(&net_loop->aio_mutex);
     LOG(LOG_INFO, "event_add=%"PRId64" event_mod=%"PRId64" event_del=%"PRId64"\n",
             net_loop->event_add, net_loop->event_mod, net_loop->event_del);
 }

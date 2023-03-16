@@ -23,8 +23,8 @@ struct net_loop_t {
     struct conn_t      *conns[2];
     struct list_head_t ready_list;
     int                ready_num;
-    struct list_head_t done_list;
-    pthread_mutex_t    done_mutex;
+    struct list_head_t aio_list;
+    pthread_mutex_t    aio_mutex;
     int                signaled;
     struct rb_root     timer_root;
     struct rb_root     keepalive_root;

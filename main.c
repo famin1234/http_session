@@ -63,13 +63,13 @@ static int net_threads_run(int num)
             conn = conn_alloc();
             conn->sock = sock;
             conn->peer_addr = nl->conn_addr;
-            conn->net_loop = net_threads[i].loop;
+            conn->net_loop = net_loop;
             conn_nonblock(conn);
             conn->handle_read = nl->handle;
             conn->handle_write = NULL;
             conn->handle_timeout = conn_close;
             conn->data = NULL;
-            conn_timer_set(conn, INT64_MAX);
+            conn_timer_set(conn, INT64_MAX - net_loop->time_current);
             conn_enable(conn, CONN_READ);
         }
     }

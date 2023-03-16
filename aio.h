@@ -14,9 +14,8 @@ struct aio_list_t {
 };
 
 struct aio_loop_t {
-    pthread_t         tid;
-    char              name[64];
-    int               exit;
+    char name[64];
+    int  exit;
 };
 
 struct aio_t {

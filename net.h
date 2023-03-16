@@ -102,6 +102,13 @@ int conn_keepalive_set(struct conn_t *conn);
 struct conn_t *conn_keepalive_get(struct net_loop_t *net_loop, struct conn_addr_t *peer_addr);
 void conn_keepalive_unset(struct conn_t *conn);
 
+int net_loop_event_init(struct net_loop_t *net_loop);
+int net_loop_event_add(struct net_loop_t *net_loop, struct conn_t *conn, uint32_t events);
+int net_loop_event_mod(struct net_loop_t *net_loop, struct conn_t *conn, uint32_t events);
+int net_loop_event_del(struct net_loop_t *net_loop, struct conn_t *conn);
+int net_loop_event_wait(struct net_loop_t *net_loop);
+int net_loop_event_clean(struct net_loop_t *net_loop);
+
 int net_loop_init(struct net_loop_t *net_loop);
 void *net_loop_loop(void *data);
 void net_loop_clean(struct net_loop_t *net_loop);

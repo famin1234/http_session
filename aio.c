@@ -21,27 +21,9 @@ void aio_clean()
     pthread_cond_destroy(&aio_cond);
 }
 
-void aio_handle_exec(struct aio_t *aio)
-{
-    aio_handle_t handle;
-
-    handle = aio->exec;
-    aio->exec = NULL;
-    handle(aio);
-}
-
-void aio_handle_done(struct aio_t *aio)
-{
-    aio_handle_t handle;
-
-    handle = aio->done;
-    aio->done = NULL;
-    handle(aio);
-}
-
 int aio_busy(struct aio_t *aio)
 {
-    if (aio->exec || aio->done) {
+    if (aio->exec) {
         return 1;
     }
     return 0;
@@ -71,7 +53,7 @@ void *aio_loop_loop(void *data)
         aio = d_list_head(&aio_list, struct aio_t, node);
         list_del(&aio->node);
         pthread_mutex_unlock(&aio_mutex);
-        aio_handle_exec(aio);
+        aio->exec(aio);
     }
     LOG(LOG_INFO, "exit\n");
     return NULL;

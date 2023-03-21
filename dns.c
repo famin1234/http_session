@@ -327,7 +327,7 @@ static void dns_client_close(struct dns_client_t *dns_client, int error)
         list_del(&aio->node);
         aio->extra = dns_cache;
         if (net_loop == aio->net_loop) {
-            aio_handle_done(aio);
+            net_loop_aio_call(aio);
         } else {
             net_loop_aio_add(aio);
         }
@@ -829,7 +829,7 @@ void dns_cache_table_query(struct aio_t *aio, const char *host)
     dns_cache->lock++;
     pthread_mutex_unlock(&dns_cache_table.mutex);
     if (aio->extra) {
-        aio_handle_done(aio);
+        net_loop_aio_call(aio);
     } else {
         LOG(LOG_DEBUG, "dns query %s wait\n", host);
     }

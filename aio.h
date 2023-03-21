@@ -14,7 +14,7 @@ struct aio_loop_t {
 struct aio_t {
     struct list_head_t node;
     aio_handle_t exec;
-    aio_handle_t done;
+    //aio_handle_t done;
     void *extra;
     void *net_loop;
     void *data;

@@ -650,7 +650,7 @@ static void http_server_create(struct http_session_t *http_session, int type)
         http_server_connect(http_session, &peer_addr);
     } else {
         assert(!aio_busy(&http_session->aio));
-        http_session->aio.done = http_server_dns_callback;
+        http_session->aio.exec = http_server_dns_callback;
         dns_cache_table_query(&http_session->aio, host);
     }
 }

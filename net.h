@@ -113,6 +113,7 @@ int net_loop_init(struct net_loop_t *net_loop);
 void *net_loop_loop(void *data);
 void net_loop_clean(struct net_loop_t *net_loop);
 void net_loop_aio_add(struct aio_t *aio);
+void net_loop_aio_call(struct aio_t *aio);
 
 extern struct list_head_t net_listen_list;
 

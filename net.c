@@ -554,6 +554,15 @@ void net_loop_aio_add(struct aio_t *aio)
     }
 }
 
+void net_loop_aio_call(struct aio_t *aio)
+{
+    aio_handle_t aio_handle;
+
+    aio_handle = aio->exec;
+    aio->exec = NULL;
+    aio_handle(aio);
+}
+
 static void net_loop_pipe_read(struct conn_t *conn)
 {
     struct net_loop_t *net_loop = conn->net_loop;
@@ -649,7 +658,7 @@ void *net_loop_loop(void *data)
         while (!list_empty(&aio_list)) {
             aio = d_list_head(&aio_list, struct aio_t, node);
             list_del(&aio->node);
-            aio_handle_done(aio);
+            net_loop_aio_call(aio);
         }
         if (net_loop->time_current - net_loop->timer_last >= TIMER_PERIOD) {
             while ((rb_node = rb_first(&net_loop->timer_root))) {

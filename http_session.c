@@ -68,7 +68,6 @@ struct http_server_t {
     } flags;
     struct http_parser_url url_parser;
     struct http_header_t header;
-    struct http_header_parser_t header_parser;
     size_t header_recv;
     struct http_chunked_t chunked;
     int64_t body_start;
@@ -619,8 +618,8 @@ static void http_server_create(struct http_session_t *http_session, int type)
     memset(http_server, 0, sizeof(struct http_server_t));
     http_server->type = type;
     http_header_init(&http_server->header);
-    http_header_parser_init(&http_server->header_parser, HTTP_RESPONSE);
-    http_server->header_parser.http_parser.data = &http_server->header;
+    http_header_parser_init(&http_session->header_parser, HTTP_RESPONSE);
+    http_session->header_parser.http_parser.data = &http_server->header;
     http_parser_url_init(&http_server->url_parser);
     if (http_parser_parse_url(string_buf(&http_session->url), string_len(&http_session->url),
                 http_session->header.request.method == HTTP_CONNECT, &http_server->url_parser)) {
@@ -974,9 +973,9 @@ static void http_server_header_process(struct http_session_t *http_session, cons
     size_t copy_len;
     size_t n;
 
-    nparse = http_header_parser_execute(&http_server->header_parser, buf, len);
+    nparse = http_header_parser_execute(&http_session->header_parser, buf, len);
     http_server->header_recv += nparse;
-    if (http_server->header_parser.http_parser.http_errno == HPE_CB_message_complete) {
+    if (http_session->header_parser.http_parser.http_errno == HPE_CB_message_complete) {
         string_init(&response, PAGE_SIZE);
         http_header_print(&http_server->header, HTTP_RESPONSE, &response);
         LOG(LOG_INFO, "url=%s sock=%d len=%zu nparse=%zu header_recv=%zu\n%s\n",
@@ -1008,7 +1007,7 @@ static void http_server_header_process(struct http_session_t *http_session, cons
             }
         }
         LOG(LOG_DEBUG, "url=%s sock=%d keepalive=%d\n", string_buf(&http_session->url), conn->sock, http_server->flags.keepalive ? 1 : 0);
-    } else if (http_server->header_parser.http_parser.http_errno == HPE_OK) {
+    } else if (http_session->header_parser.http_parser.http_errno == HPE_OK) {
         LOG(LOG_DEBUG, "url=%s sock=%d len=%zu nparse=%zu header_recv=%zu continue\n", string_buf(&http_session->url), conn->sock, len, nparse, http_server->header_recv);
         assert(nparse == len);
         conn_enable(conn, CONN_READ);

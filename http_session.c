@@ -65,7 +65,7 @@ struct http_server_t {
         int proxy:1;
         int chunked:1;
         int keepalive:1;
-    } flag;
+    } flags;
     struct http_parser_url url_parser;
     struct http_header_t header;
     struct http_header_parser_t header_parser;
@@ -85,7 +85,7 @@ struct http_session_t {
     struct {
         int transparent:1;
         int keepalive:1;
-    } flag;
+    } flags;
     struct http_header_t header;
     struct http_header_parser_t header_parser;
     size_t header_recv;
@@ -166,7 +166,7 @@ static void http_session_accept(struct conn_t *conn_listen)
         conn = conn_alloc();
         conn->sock = sock;
         conn->peer_addr = conn_addr;
-        conn->net_thread = conn_listen->net_thread;
+        conn->net_loop = conn_listen->net_loop;
         conn_nonblock(conn);
         http_session_create(conn, HTTP_CLIENT_ACCEPT);
     } else if(sock == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
@@ -185,7 +185,7 @@ static void http_session_create(struct conn_t *conn, int type)
 
     http_session = mem_malloc(sizeof(struct http_session_t));
     memset(http_session, 0, sizeof(struct http_session_t));
-    http_session->aio.net_thread = conn->net_thread;
+    http_session->aio.net_loop = conn->net_loop;
     http_session->aio.data = http_session;
     http_session->conn = conn;
     string_init(&http_session->url, URL_LEN);
@@ -249,7 +249,7 @@ static void http_client_header_process(struct http_session_t *http_session, cons
         string_init(&request, PAGE_SIZE);
         http_header_print(&http_session->header, HTTP_REQUEST, &request);
         if (string_buf(&http_session->url)[0] == '/') {
-            http_session->flag.transparent = 1;
+            http_session->flags.transparent = 1;
             value = http_header_find(&http_session->header, "Host");
             if (value) {
                 string_init(&url, URL_LEN);
@@ -275,7 +275,7 @@ static void http_client_header_process(struct http_session_t *http_session, cons
             http_session->post_end = INT64_MAX;
         }
         if (http_session->header.http_major >= 1 && http_session->header.http_minor >= 1) {
-            http_session->flag.keepalive = 1;
+            http_session->flags.keepalive = 1;
         }
         value = http_header_find(&http_session->header, "Proxy-Connection");
         if (!value) {
@@ -283,12 +283,12 @@ static void http_client_header_process(struct http_session_t *http_session, cons
         }
         if (value) {
             if (strcasecmp(value, "Keep-Alive") == 0) {
-                http_session->flag.keepalive = 1;
+                http_session->flags.keepalive = 1;
             } else {
-                http_session->flag.keepalive = 0;
+                http_session->flags.keepalive = 0;
             }
         }
-        LOG(LOG_DEBUG, "url=%s sock=%d keepalive=%d\n", string_buf(&http_session->url), conn->sock, http_session->flag.keepalive ? 1 : 0);
+        LOG(LOG_DEBUG, "url=%s sock=%d keepalive=%d\n", string_buf(&http_session->url), conn->sock, http_session->flags.keepalive ? 1 : 0);
     } else if (http_session->header_parser.http_parser.http_errno == HPE_OK) {
         LOG(LOG_DEBUG, "url=%s sock=%d len=%zu nparse=%zu header_recv=%zu continue\n", string_buf(&http_session->url), conn->sock, len, nparse, http_session->header_recv);
         assert(nparse == len);
@@ -427,14 +427,14 @@ static void http_client_build_response(struct http_session_t *http_session, int 
             assert(0);
             break;
     }
-    if (http_session->flag.keepalive) {
-        if (http_session->flag.transparent) {
+    if (http_session->flags.keepalive) {
+        if (http_session->flags.transparent) {
             string_strcat(&http_session->response, "Connection: keep-alive\r\n");
         } else {
             string_strcat(&http_session->response, "Proxy-Connection: keep-alive\r\n");
         }
     } else {
-        if (http_session->flag.transparent) {
+        if (http_session->flags.transparent) {
             string_strcat(&http_session->response, "Connection: close\r\n");
         } else {
             string_strcat(&http_session->response, "Proxy-Connection: close\r\n");
@@ -596,7 +596,7 @@ static void http_client_close(struct http_session_t *http_session, int err)
     struct conn_t *conn = http_session->conn;
     LOG(LOG_INFO, "url=%s sock=%d body_size=%"PRId64" err=%d\n",
             string_buf(&http_session->url), conn->sock, http_session->body_send - http_session->body_start, err);
-    if (!err && http_session->flag.keepalive) {
+    if (!err && http_session->flags.keepalive) {
         http_client_keepalive(http_session);
     } else {
         conn_close(conn);
@@ -650,7 +650,7 @@ static void http_server_create(struct http_session_t *http_session, int type)
         http_server_connect(http_session, &peer_addr);
     } else {
         assert(!aio_busy(&http_session->aio));
-        http_session->aio.done = http_server_dns_callback;
+        http_session->aio.exec = http_server_dns_callback;
         dns_cache_table_query(&http_session->aio, host);
     }
 }
@@ -704,7 +704,7 @@ static void http_server_connect(struct http_session_t *http_session, struct conn
     int sock;
     char str[64];
 
-    http_server->conn = conn = conn_keepalive_get(http_session->aio.net_thread, conn_addr);
+    http_server->conn = conn = conn_keepalive_get(http_session->aio.net_loop, conn_addr);
     if (conn) {
         LOG(LOG_INFO, "url=%s sock=%d %s reuse\n", string_buf(&http_session->url), conn->sock, conn_addr_ntop(&conn->peer_addr, str, sizeof(str)));
         http_server_connect_done(http_session, ERR_OK);
@@ -719,7 +719,7 @@ static void http_server_connect(struct http_session_t *http_session, struct conn
     http_server->conn = conn = conn_alloc();
     conn->sock = sock;
     conn->peer_addr = *conn_addr;
-    conn->net_thread = http_session->aio.net_thread;
+    conn->net_loop = http_session->aio.net_loop;
     conn_nonblock(conn);
     conn->handle_read = http_server_header_read;
     conn->handle_write = http_server_connect_check;
@@ -807,7 +807,7 @@ static void http_server_build_request(struct http_session_t *http_session)
 
     assert(string_size(&http_server->request) == 0);
     string_init(&http_server->request, PAGE_SIZE);
-    if (http_server->flag.proxy) {
+    if (http_server->flags.proxy) {
         uri = string_buf(&http_session->url);
     } else {
         uri = string_buf(&http_session->url) + http_server->url_parser.field_data[UF_PATH].off;
@@ -830,13 +830,13 @@ static void http_server_build_request(struct http_session_t *http_session)
         string_sprint(&http_server->request, "Range: bytes=%"PRId64"-%"PRId64"\r\n", http_session->body_high, http_session->body_end - 1);
     }
     if (1) {
-        if (http_server->flag.proxy) {
+        if (http_server->flags.proxy) {
             string_strcat(&http_server->request, "Proxy-Connection: keep-alive\r\n");
         } else {
             string_strcat(&http_server->request, "Connection: keep-alive\r\n");
         }
     } else {
-        if (http_server->flag.proxy) {
+        if (http_server->flags.proxy) {
             string_strcat(&http_server->request, "Proxy-Connection: close\r\n");
         } else {
             string_strcat(&http_server->request, "Connection: close\r\n");
@@ -994,7 +994,7 @@ static void http_server_header_process(struct http_session_t *http_session, cons
             http_server->body_end = INT64_MAX;
         }
         if (http_server->header.http_major >= 1 && http_server->header.http_minor >= 1) {
-            http_server->flag.keepalive = 1;
+            http_server->flags.keepalive = 1;
         }
         value = http_header_find(&http_server->header, "Proxy-Connection");
         if (!value) {
@@ -1002,12 +1002,12 @@ static void http_server_header_process(struct http_session_t *http_session, cons
         }
         if (value) {
             if (strcasecmp(value, "Keep-Alive") == 0) {
-                http_server->flag.keepalive = 1;
+                http_server->flags.keepalive = 1;
             } else {
-                http_server->flag.keepalive = 0;
+                http_server->flags.keepalive = 0;
             }
         }
-        LOG(LOG_DEBUG, "url=%s sock=%d keepalive=%d\n", string_buf(&http_session->url), conn->sock, http_server->flag.keepalive ? 1 : 0);
+        LOG(LOG_DEBUG, "url=%s sock=%d keepalive=%d\n", string_buf(&http_session->url), conn->sock, http_server->flags.keepalive ? 1 : 0);
     } else if (http_server->header_parser.http_parser.http_errno == HPE_OK) {
         LOG(LOG_DEBUG, "url=%s sock=%d len=%zu nparse=%zu header_recv=%zu continue\n", string_buf(&http_session->url), conn->sock, len, nparse, http_server->header_recv);
         assert(nparse == len);
@@ -1020,7 +1020,7 @@ static void http_server_header_process(struct http_session_t *http_session, cons
     }
     value = http_header_find(&http_server->header, "Transfer-Encoding");
     if (value && strcmp(value, "chunked") == 0) {
-        http_server->flag.chunked = 1;
+        http_server->flags.chunked = 1;
         http_server->body_end = INT64_MAX;
     } else {
         if (http_server->header.response.status_code == HTTP_STATUS_PARTIAL_CONTENT) {
@@ -1136,7 +1136,7 @@ static void http_server_body_process(struct http_session_t *http_session, const 
     size_t pos;
     size_t parse;
 
-    if (http_server->flag.chunked) {
+    if (http_server->flags.chunked) {
         parse = 0;
         do {
             chunked_len = len - parse;
@@ -1197,18 +1197,18 @@ static void http_server_keepalive_timeout(struct conn_t *conn)
 static void http_server_keepalive_read(struct conn_t *conn)
 {
     char buf[PAGE_SIZE];
-    int n;
+    ssize_t n;
 
     n = read(conn->sock, buf, sizeof(buf));
     if (n > 0) {
-        LOG(LOG_DEBUG, "sock=%d read=%d\n", conn->sock, n);
+        LOG(LOG_DEBUG, "sock=%d read=%zd\n", conn->sock, n);
         conn_keepalive_unset(conn);
         conn_close(conn);
     } else if(n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
         conn_ready_unset(conn, CONN_READ);
         conn_enable(conn, CONN_READ);
     } else {
-        LOG(LOG_ERROR, "sock=%d read=%d error:%s\n", conn->sock, n, strerror(errno));
+        LOG(LOG_ERROR, "sock=%d read=%zd error:%s\n", conn->sock, n, strerror(errno));
         conn_keepalive_unset(conn);
         conn_close(conn);
     }
@@ -1220,11 +1220,11 @@ static void http_server_keepalive(struct http_session_t *http_session)
     struct conn_t *conn = http_server->conn;
     char str[64];
     char buf[PAGE_SIZE];
-    int n;
+    ssize_t n;
 
     n = read(conn->sock, buf, sizeof(buf));
     if (n > 0) {
-        LOG(LOG_ERROR, "url=%s sock=%d read=%d\n", string_buf(&http_session->url), conn->sock, n);
+        LOG(LOG_ERROR, "url=%s sock=%d read=%zd\n", string_buf(&http_session->url), conn->sock, n);
         conn_close(conn);
     } else if(n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
         conn_ready_unset(conn, CONN_READ);
@@ -1237,10 +1237,11 @@ static void http_server_keepalive(struct http_session_t *http_session)
             conn->handle_write = NULL;
             conn->handle_timeout = http_server_keepalive_timeout;
             conn_timer_set(conn, HTTP_SERVER_TIMEOUT);
+            conn_disable(conn, CONN_WRITE);
             conn_enable(conn, CONN_READ);
         }
     } else {
-        LOG(LOG_ERROR, "url=%s sock=%d read=%d error:%s\n", string_buf(&http_session->url), conn->sock, n, strerror(errno));
+        LOG(LOG_ERROR, "url=%s sock=%d read=%zd error:%s\n", string_buf(&http_session->url), conn->sock, n, strerror(errno));
         conn_close(conn);
     }
 }
@@ -1252,7 +1253,7 @@ static void http_server_close(struct http_session_t *http_session, int err)
     LOG(LOG_INFO, "url=%s sock=%d body_size=%"PRId64" err=%d\n",
             string_buf(&http_session->url), conn?conn->sock:-1, http_session->body_high - http_server->body_start, err);
     if (conn) {
-        if (!err && http_server->flag.keepalive) {
+        if (!err && http_server->flags.keepalive) {
             http_server_keepalive(http_session);
         } else {
             conn_close(conn);

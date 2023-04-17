@@ -25,7 +25,7 @@ void net_clean()
 int net_listen_list_add(const char *host, unsigned short port, conn_handle_t handle)
 {
     struct net_listen_t *nl;
-    struct conn_addr_t conn_addr;
+    union conn_addr_t conn_addr;
 
     if (conn_addr_pton(&conn_addr, host, port) > 0) {
         nl = mem_malloc(sizeof(struct net_listen_t));
@@ -39,7 +39,7 @@ int net_listen_list_add(const char *host, unsigned short port, conn_handle_t han
     return 0;
 }
 
-int net_listen(net_socket_t sock, struct conn_addr_t *conn_addr)
+int net_listen(net_socket_t sock, union conn_addr_t *conn_addr)
 {
     int on = 1;
     if (conn_addr->addr.sa_family == AF_INET6) {
@@ -53,7 +53,7 @@ int net_listen(net_socket_t sock, struct conn_addr_t *conn_addr)
     if (setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on))) {
         return -1;
     }
-    if (bind(sock, &conn_addr->addr, conn_addr->addrlen) != 0) {
+    if (bind(sock, &conn_addr->addr, sizeof(union conn_addr_t)) != 0) {
         return -1;
     }
     if (listen(sock, LISTEN_MAX)) {
@@ -62,12 +62,11 @@ int net_listen(net_socket_t sock, struct conn_addr_t *conn_addr)
     return 0;
 }
 
-int conn_addr_pton(struct conn_addr_t *conn_addr, const char *host, unsigned short port)
+int conn_addr_pton(union conn_addr_t *conn_addr, const char *host, unsigned short port)
 {
     if (inet_pton(AF_INET, host, &conn_addr->in.sin_addr) == 1) {
         conn_addr->in.sin_family = AF_INET;
         conn_addr->in.sin_port = htons(port);
-        conn_addr->addrlen = sizeof(struct sockaddr_in);
         return 1;
     }
     if (inet_pton(AF_INET6, host, &conn_addr->in6.sin6_addr) == 1) {
@@ -75,13 +74,12 @@ int conn_addr_pton(struct conn_addr_t *conn_addr, const char *host, unsigned sho
         conn_addr->in6.sin6_port = htons(port);
         conn_addr->in6.sin6_flowinfo = 0;
         conn_addr->in6.sin6_scope_id = 0;
-        conn_addr->addrlen = sizeof(struct sockaddr_in6);
         return 1;
     }
     return -1;
 }
 
-const char *conn_addr_ntop(struct conn_addr_t *conn_addr, char *buf, socklen_t size)
+const char *conn_addr_ntop(union conn_addr_t *conn_addr, char *buf, socklen_t size)
 {
     char str[64];
     if (conn_addr->addr.sa_family == AF_INET) {
@@ -96,7 +94,7 @@ const char *conn_addr_ntop(struct conn_addr_t *conn_addr, char *buf, socklen_t s
     return buf;
 }
 
-uint16_t conn_addr_port(struct conn_addr_t *conn_addr)
+uint16_t conn_addr_port(union conn_addr_t *conn_addr)
 {
     if (conn_addr->addr.sa_family == AF_INET) {
         return ntohs(conn_addr->in.sin_port);
@@ -106,7 +104,7 @@ uint16_t conn_addr_port(struct conn_addr_t *conn_addr)
     return 0;
 }
 
-int conn_addr_compare(const struct conn_addr_t *conn_addr1, const struct conn_addr_t *conn_addr2)
+int conn_addr_compare(const union conn_addr_t *conn_addr1, const union conn_addr_t *conn_addr2)
 {
     if (conn_addr1->addr.sa_family < conn_addr2->addr.sa_family) {
         return -1;
@@ -396,7 +394,7 @@ int conn_keepalive_set(struct conn_t *conn)
     return 0;
 }
 
-struct conn_t *conn_keepalive_get(struct net_loop_t *net_loop, struct conn_addr_t *peer_addr)
+struct conn_t *conn_keepalive_get(struct net_loop_t *net_loop, union conn_addr_t *peer_addr)
 {
     struct rb_node *node = net_loop->keepalive_root.rb_node;
     struct conn_t *conn;

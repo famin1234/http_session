@@ -64,7 +64,7 @@ struct rfc1035_message_t {
     struct rfc1035_rr_t *answer;
 };
 
-static struct conn_addr_t dns_addr;
+static union conn_addr_t dns_addr;
 static struct dns_cache_table_t dns_cache_table;
 
 static struct dns_cache_t* dns_cache_alloc(const char *host);
@@ -209,12 +209,13 @@ static void dns_client_read(struct conn_t *conn)
     struct dns_client_t *dns_client = conn->data;
     struct dns_cache_t *dns_cache = dns_client->dns_cache;
     char *host = dns_cache->host;
-    struct conn_addr_t conn_addr;
-    conn_addr.addrlen = conn->peer_addr.addrlen;
+    union conn_addr_t conn_addr;
+    socklen_t addrlen;
     char buf[DNS_BUFFER_MAX];
     ssize_t n;
 
-    n = recvfrom(conn->sock, buf, sizeof(buf), 0, &conn_addr.addr, &conn_addr.addrlen);
+    addrlen = sizeof(union conn_addr_t);
+    n = recvfrom(conn->sock, buf, sizeof(buf), 0, &conn_addr.addr, &addrlen);
     if (n > 0) {
         LOG(LOG_DEBUG, "host=%s sock=%d recv=%zd\n", host, conn->sock, n);
         dns_client_parse(dns_client, buf, n);
@@ -274,7 +275,7 @@ static void dns_client_write(struct conn_t *conn)
     memcpy(buf + buf_len, &s, sizeof(s));
     buf_len += sizeof(s);
 
-    n = sendto(conn->sock, buf, buf_len, 0, &conn->peer_addr.addr, conn->peer_addr.addrlen);
+    n = sendto(conn->sock, buf, buf_len, 0, &conn->peer_addr.addr, sizeof(union conn_addr_t));
     if (n > 0) {
         LOG(LOG_DEBUG, "host=%s sock=%d send=%zd\n", host, conn->sock, n);
         if (n == buf_len) {

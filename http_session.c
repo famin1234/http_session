@@ -121,7 +121,7 @@ static void http_client_close(struct http_session_t *http_session, int err);
 
 static void http_server_create(struct http_session_t *http_session, int type);
 static void http_server_dns_callback(struct aio_t *aio);
-static void http_server_connect(struct http_session_t *http_session, struct conn_addr_t *conn_addr);
+static void http_server_connect(struct http_session_t *http_session, union conn_addr_t *conn_addr);
 static void http_server_connect_check(struct conn_t *conn);
 static void http_server_connect_done(struct http_session_t *http_session, int err);
 static void http_server_build_request(struct http_session_t *http_session);
@@ -154,11 +154,12 @@ static void http_session_accept(struct conn_t *conn_listen)
 {
     net_socket_t sock;
     struct conn_t *conn;
-    struct conn_addr_t conn_addr;
+    union conn_addr_t conn_addr;
+    socklen_t addrlen;
     char str[64];
 
-    conn_addr.addrlen = sizeof(struct conn_addr_t);
-    sock = accept(conn_listen->sock, &conn_addr.addr, &conn_addr.addrlen);
+    addrlen = sizeof(union conn_addr_t);
+    sock = accept(conn_listen->sock, &conn_addr.addr, &addrlen);
     if (sock > 0) {
         conn_enable(conn_listen, CONN_READ);
         LOG(LOG_INFO, "sock=%d accept=%d %s\n", conn_listen->sock, sock, conn_addr_ntop(&conn_addr, str, sizeof(str)));
@@ -611,7 +612,7 @@ static void http_client_close(struct http_session_t *http_session, int err)
 static void http_server_create(struct http_session_t *http_session, int type)
 {
     struct http_server_t *http_server;
-    struct conn_addr_t peer_addr;
+    union conn_addr_t peer_addr;
     char host[HOST_MAX];
 
     http_session->http_server = http_server = mem_malloc(sizeof(struct http_server_t));
@@ -658,12 +659,12 @@ static void http_server_dns_callback(struct aio_t *aio)
 {
     struct http_session_t *http_session = aio->data;
     struct http_server_t *http_server = http_session->http_server;
-    struct conn_addr_t peer_addr;
+    union conn_addr_t peer_addr;
     struct dns_cache_t *dns_cache = aio->extra;
     struct dns_addr_t *dns_addr;
 
     LOG(LOG_DEBUG, "url=%s query done\n", string_buf(&http_session->url));
-    peer_addr.addrlen = 0;
+    peer_addr.addr.sa_family = AF_UNSPEC;
     if (dns_cache) {
         if (!list_empty(&dns_cache->addr_list)) {
             dns_addr = d_list_head(&dns_cache->addr_list, struct dns_addr_t, node);
@@ -671,14 +672,12 @@ static void http_server_dns_callback(struct aio_t *aio)
                 peer_addr.in.sin_family = AF_INET;
                 peer_addr.in.sin_port = htons(http_server->url_parser.port);
                 peer_addr.in.sin_addr = dns_addr->in_addr;
-                peer_addr.addrlen = sizeof(struct sockaddr_in);
             } else if (dns_addr->af == AF_INET6) {
                 peer_addr.in6.sin6_family = AF_INET6;
                 peer_addr.in6.sin6_port = htons(http_server->url_parser.port);
                 peer_addr.in6.sin6_flowinfo = 0;
                 peer_addr.in6.sin6_addr = dns_addr->in6_addr;
                 peer_addr.in6.sin6_scope_id = 0;
-                peer_addr.addrlen = sizeof(struct sockaddr_in6);
             }
             dns_cache_table_unquery(&http_session->aio);
         }
@@ -687,7 +686,7 @@ static void http_server_dns_callback(struct aio_t *aio)
         assert(http_session->conn == NULL);
         http_session_close(http_session);
     } else {
-        if (peer_addr.addrlen > 0) {
+        if (peer_addr.addr.sa_family != AF_UNSPEC) {
             http_server_connect(http_session, &peer_addr);
         } else {
             LOG(LOG_ERROR, "url=%s conn_addr is empty\n", string_buf(&http_session->url));
@@ -696,7 +695,7 @@ static void http_server_dns_callback(struct aio_t *aio)
     }
 }
 
-static void http_server_connect(struct http_session_t *http_session, struct conn_addr_t *conn_addr)
+static void http_server_connect(struct http_session_t *http_session, union conn_addr_t *conn_addr)
 {
     struct http_server_t *http_server = http_session->http_server;
     struct conn_t *conn;
@@ -726,7 +725,7 @@ static void http_server_connect(struct http_session_t *http_session, struct conn
     conn->data = http_session;
     LOG(LOG_DEBUG, "url=%s sock=%d connect %s\n", string_buf(&http_session->url), conn->sock, conn_addr_ntop(&conn->peer_addr, str, sizeof(str)));
     conn_timer_set(conn, HTTP_SERVER_TIMEOUT);
-    if (connect(conn->sock, &conn->peer_addr.addr, conn->peer_addr.addrlen) == 0) {
+    if (connect(conn->sock, &conn->peer_addr.addr, sizeof(union conn_addr_t)) == 0) {
         http_server_connect_done(http_session, ERR_OK);
     } else if (errno == EINPROGRESS) {
         conn_enable(conn, CONN_WRITE);

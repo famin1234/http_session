@@ -36,24 +36,21 @@ struct net_loop_t {
     int64_t            event_del;
 };
 
-struct conn_addr_t {
-    union {
-        struct sockaddr addr;
-        struct sockaddr_in in;
-        struct sockaddr_in6 in6;
-    };
-    socklen_t addrlen;
+union conn_addr_t {
+    struct sockaddr addr;
+    struct sockaddr_in in;
+    struct sockaddr_in6 in6;
 };
 
 struct net_listen_t {
-    struct conn_addr_t conn_addr;
+    union conn_addr_t conn_addr;
     conn_handle_t handle;
     struct list_head_t node;
 };
 
 struct conn_t {
     net_socket_t sock;
-    struct conn_addr_t peer_addr;
+    union conn_addr_t peer_addr;
     struct net_loop_t *net_loop;
     struct list_head_t ready_node;
     struct rb_node keepalive_node;
@@ -80,12 +77,12 @@ int net_init();
 void net_clean();
 
 int net_listen_list_add(const char *host, unsigned short port, conn_handle_t handle);
-int net_listen(net_socket_t sock, struct conn_addr_t *conn_addr);
+int net_listen(net_socket_t sock, union conn_addr_t *conn_addr);
 
-int conn_addr_pton(struct conn_addr_t *conn_addr, const char *host, unsigned short port);
-const char *conn_addr_ntop(struct conn_addr_t *conn_addr, char *buf, socklen_t size);
-uint16_t conn_addr_port(struct conn_addr_t *conn_addr);
-int conn_addr_compare(const struct conn_addr_t *conn_addr1, const struct conn_addr_t *conn_addr2);
+int conn_addr_pton(union conn_addr_t *conn_addr, const char *host, unsigned short port);
+const char *conn_addr_ntop(union conn_addr_t *conn_addr, char *buf, socklen_t size);
+uint16_t conn_addr_port(union conn_addr_t *conn_addr);
+int conn_addr_compare(const union conn_addr_t *conn_addr1, const union conn_addr_t *conn_addr2);
 
 struct conn_t *conn_alloc(void);
 void conn_close(struct conn_t *conn);
@@ -99,7 +96,7 @@ void conn_ready_unset(struct conn_t *conn, int flags);
 void conn_timer_set(struct conn_t *conn, int64_t timeout);
 void conn_timer_unset(struct conn_t *conn);
 int conn_keepalive_set(struct conn_t *conn);
-struct conn_t *conn_keepalive_get(struct net_loop_t *net_loop, struct conn_addr_t *peer_addr);
+struct conn_t *conn_keepalive_get(struct net_loop_t *net_loop, union conn_addr_t *peer_addr);
 void conn_keepalive_unset(struct conn_t *conn);
 
 int net_loop_event_init(struct net_loop_t *net_loop);

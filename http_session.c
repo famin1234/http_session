@@ -1312,3 +1312,19 @@ static void http_session_close(struct http_session_t *http_session)
     string_clean(&http_session->response);
     mem_free(http_session);
 }
+
+struct http_cache_info_t {
+    pthread_mutex_t mutex;
+    char *url;
+    int fd;
+    int header_size;
+    struct http_header_t header;
+};
+
+struct http_cache_t {
+    unsigned char key[16];
+    int lock;
+    int64_t fileno;
+    struct http_cache_info_t *info;
+};
+

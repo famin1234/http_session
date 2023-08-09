@@ -16,7 +16,8 @@ struct conn_t;
 typedef int net_socket_t;
 typedef void (*conn_handle_t)(struct conn_t *conn);
 
-struct net_loop_t {
+struct net_thread_t {
+    pthread_t          tid;
     char               name[64];
     int                exit;
     int                efd;
@@ -51,7 +52,7 @@ struct net_listen_t {
 struct conn_t {
     net_socket_t sock;
     union conn_addr_t peer_addr;
-    struct net_loop_t *net_loop;
+    struct net_thread_t *net_thread;
     struct list_head_t ready_node;
     struct rb_node keepalive_node;
     struct rb_node timer_node;
@@ -96,21 +97,21 @@ void conn_ready_unset(struct conn_t *conn, int flags);
 void conn_timer_set(struct conn_t *conn, int64_t timeout);
 void conn_timer_unset(struct conn_t *conn);
 int conn_keepalive_set(struct conn_t *conn);
-struct conn_t *conn_keepalive_get(struct net_loop_t *net_loop, union conn_addr_t *peer_addr);
+struct conn_t *conn_keepalive_get(struct net_thread_t *net_thread, union conn_addr_t *peer_addr);
 void conn_keepalive_unset(struct conn_t *conn);
 
-int net_loop_event_init(struct net_loop_t *net_loop);
-int net_loop_event_add(struct net_loop_t *net_loop, struct conn_t *conn, uint32_t events);
-int net_loop_event_mod(struct net_loop_t *net_loop, struct conn_t *conn, uint32_t events);
-int net_loop_event_del(struct net_loop_t *net_loop, struct conn_t *conn);
-int net_loop_event_wait(struct net_loop_t *net_loop);
-int net_loop_event_clean(struct net_loop_t *net_loop);
+int net_thread_event_init(struct net_thread_t *net_thread);
+int net_thread_event_add(struct net_thread_t *net_thread, struct conn_t *conn, uint32_t events);
+int net_thread_event_mod(struct net_thread_t *net_thread, struct conn_t *conn, uint32_t events);
+int net_thread_event_del(struct net_thread_t *net_thread, struct conn_t *conn);
+int net_thread_event_wait(struct net_thread_t *net_thread);
+int net_thread_event_clean(struct net_thread_t *net_thread);
 
-int net_loop_init(struct net_loop_t *net_loop);
-void *net_loop_loop(void *data);
-void net_loop_clean(struct net_loop_t *net_loop);
-void net_loop_aio_add(struct aio_t *aio);
-void net_loop_aio_call(struct aio_t *aio);
+int net_thread_init(struct net_thread_t *net_thread);
+void *net_thread_loop(void *data);
+void net_thread_clean(struct net_thread_t *net_thread);
+void net_thread_aio_add(struct aio_t *aio);
+void net_thread_aio_call(struct aio_t *aio);
 
 extern struct list_head_t net_listen_list;
 

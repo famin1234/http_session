@@ -6,7 +6,8 @@
 struct aio_t;
 typedef void (*aio_handle_t)(struct aio_t *);
 
-struct aio_loop_t {
+struct aio_thread_t {
+    pthread_t tid;
     char name[64];
     int  exit;
 };
@@ -16,7 +17,7 @@ struct aio_t {
     aio_handle_t exec;
     //aio_handle_t done;
     void *extra;
-    void *net_loop;
+    void *net_thread;
     void *data;
 };
 
@@ -27,9 +28,9 @@ int aio_busy(struct aio_t *aio);
 void aio_handle_exec(struct aio_t *aio);
 void aio_handle_done(struct aio_t *aio);
 
-int aio_loop_init(struct aio_loop_t *aio_loop);
-void *aio_loop_loop(void *data);
-void aio_loop_clean(struct aio_loop_t *aio_loop);
-void aio_loop_signal();
+int aio_thread_init(struct aio_thread_t *aio_thread);
+void *aio_thread_loop(void *data);
+void aio_thread_clean(struct aio_thread_t *aio_thread);
+void aio_thread_signal();
 
 #endif

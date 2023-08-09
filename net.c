@@ -190,7 +190,7 @@ int conn_nonblock(struct conn_t *conn)
 
 void conn_enable(struct conn_t *conn, int flags)
 {
-    struct net_loop_t *net_loop = conn->net_loop;
+    struct net_thread_t *net_thread = conn->net_thread;
     int err;
     uint32_t events;
 
@@ -199,9 +199,9 @@ void conn_enable(struct conn_t *conn, int flags)
         conn->flags.read_enable = 1;
         if (conn->flags.read_ready) {
             if (!conn->flags.in_ready_list) {
-                list_add_tail(&conn->ready_node, &net_loop->ready_list);
+                list_add_tail(&conn->ready_node, &net_thread->ready_list);
                 conn->flags.in_ready_list = 1;
-                net_loop->ready_num++;
+                net_thread->ready_num++;
             }
         } else {
             events |= CONN_READ;
@@ -211,9 +211,9 @@ void conn_enable(struct conn_t *conn, int flags)
         conn->flags.write_enable = 1;
         if (conn->flags.write_ready) {
             if (!conn->flags.in_ready_list) {
-                list_add_tail(&conn->ready_node, &net_loop->ready_list);
+                list_add_tail(&conn->ready_node, &net_thread->ready_list);
                 conn->flags.in_ready_list = 1;
-                net_loop->ready_num++;
+                net_thread->ready_num++;
             }
         } else {
             events |= CONN_WRITE;
@@ -221,9 +221,9 @@ void conn_enable(struct conn_t *conn, int flags)
     }
     if (events != conn->events) {
         if (conn->events) {
-            err = net_loop_event_mod(net_loop, conn, events);
+            err = net_thread_event_mod(net_thread, conn, events);
         } else {
-            err = net_loop_event_add(net_loop, conn, events);
+            err = net_thread_event_add(net_thread, conn, events);
         }
         if (!err) {
             conn->events = events;
@@ -233,7 +233,7 @@ void conn_enable(struct conn_t *conn, int flags)
 
 void conn_disable(struct conn_t *conn, int flags)
 {
-    struct net_loop_t *net_loop = conn->net_loop;
+    struct net_thread_t *net_thread = conn->net_thread;
     int err;
     uint32_t events;
 
@@ -248,9 +248,9 @@ void conn_disable(struct conn_t *conn, int flags)
     }
     if (events != conn->events) {
         if (events) {
-            err = net_loop_event_mod(net_loop, conn, events);
+            err = net_thread_event_mod(net_thread, conn, events);
         } else {
-            err = net_loop_event_del(net_loop, conn);
+            err = net_thread_event_del(net_thread, conn);
         }
         if (!err) {
             conn->events = events;
@@ -260,7 +260,7 @@ void conn_disable(struct conn_t *conn, int flags)
         if (conn->flags.in_ready_list) {
             list_del(&conn->ready_node);
             conn->flags.in_ready_list = 0;
-            net_loop->ready_num--;
+            net_thread->ready_num--;
         }
     }
 }
@@ -304,8 +304,8 @@ static int conn_timer_compare(struct conn_t *conn1, struct conn_t *conn2)
 
 static int conn_timer_insert(struct conn_t *conn)
 {
-    struct net_loop_t *net_loop = conn->net_loop;
-    struct rb_node **p = &net_loop->timer_root.rb_node;
+    struct net_thread_t *net_thread = conn->net_thread;
+    struct rb_node **p = &net_thread->timer_root.rb_node;
     struct rb_node *parent = NULL;
     struct conn_t *tmp;
     int cmp;
@@ -323,20 +323,20 @@ static int conn_timer_insert(struct conn_t *conn)
             return -1;
     }
     rb_link_node(&conn->timer_node, parent, p);
-    rb_insert_color(&conn->timer_node, &net_loop->timer_root);
+    rb_insert_color(&conn->timer_node, &net_thread->timer_root);
     return 0;
 }
 
 void conn_timer_set(struct conn_t *conn, int64_t timeout)
 {
-    struct net_loop_t *net_loop = conn->net_loop;
+    struct net_thread_t *net_thread = conn->net_thread;
     int64_t expire;
 
-    expire = net_loop->time_current + timeout;
+    expire = net_thread->time_current + timeout;
     if (conn->flags.timer_set) {
         if (expire - conn->timer_expire >= TIMER_PERIOD) {
             conn->timer_expire = expire;
-            rb_erase(&conn->timer_node, &net_loop->timer_root);
+            rb_erase(&conn->timer_node, &net_thread->timer_root);
             conn_timer_insert(conn);
         }
     } else {
@@ -351,18 +351,18 @@ void conn_timer_set(struct conn_t *conn, int64_t timeout)
 
 void conn_timer_unset(struct conn_t *conn)
 {
-    struct net_loop_t *net_loop = conn->net_loop;
+    struct net_thread_t *net_thread = conn->net_thread;
 
     if (conn->flags.timer_set) {
-        rb_erase(&conn->timer_node, &net_loop->timer_root);
+        rb_erase(&conn->timer_node, &net_thread->timer_root);
         conn->flags.timer_set = 0;
     }
 }
 
 int conn_keepalive_set(struct conn_t *conn)
 {
-    struct net_loop_t *net_loop = conn->net_loop;
-    struct rb_node **p = &net_loop->keepalive_root.rb_node;
+    struct net_thread_t *net_thread = conn->net_thread;
+    struct rb_node **p = &net_thread->keepalive_root.rb_node;
     struct rb_node *parent = NULL;
     struct conn_t *tmp;
     int cmp;
@@ -390,13 +390,13 @@ int conn_keepalive_set(struct conn_t *conn)
         }
     }
     rb_link_node(&conn->keepalive_node, parent, p);
-    rb_insert_color(&conn->keepalive_node, &net_loop->keepalive_root);
+    rb_insert_color(&conn->keepalive_node, &net_thread->keepalive_root);
     return 0;
 }
 
-struct conn_t *conn_keepalive_get(struct net_loop_t *net_loop, union conn_addr_t *peer_addr)
+struct conn_t *conn_keepalive_get(struct net_thread_t *net_thread, union conn_addr_t *peer_addr)
 {
-    struct rb_node *node = net_loop->keepalive_root.rb_node;
+    struct rb_node *node = net_thread->keepalive_root.rb_node;
     struct conn_t *conn;
     int cmp;
 
@@ -417,43 +417,22 @@ struct conn_t *conn_keepalive_get(struct net_loop_t *net_loop, union conn_addr_t
 
 void conn_keepalive_unset(struct conn_t *conn)
 {
-    struct net_loop_t *net_loop = conn->net_loop;
+    struct net_thread_t *net_thread = conn->net_thread;
 
-    rb_erase(&conn->keepalive_node, &net_loop->keepalive_root);
+    rb_erase(&conn->keepalive_node, &net_thread->keepalive_root);
 }
 
-int net_loop_event_init(struct net_loop_t *net_loop)
+int net_thread_event_init(struct net_thread_t *net_thread)
 {
-    net_loop->efd = epoll_create(EPOLL_FD_MAX);
-    if (net_loop->efd < 0) {
+    net_thread->efd = epoll_create(EPOLL_FD_MAX);
+    if (net_thread->efd < 0) {
         return -1;
     }
-    LOG(LOG_INFO, "%s efd %d create\n", net_loop->name, net_loop->efd);
+    LOG(LOG_INFO, "%s efd %d create\n", net_thread->name, net_thread->efd);
     return 0;
 }
 
-int net_loop_event_add(struct net_loop_t *net_loop, struct conn_t *conn, uint32_t events)
-{
-    struct epoll_event ee;
-
-    ee.events = EPOLLET;
-    if (events & CONN_READ) {
-        ee.events |= EPOLLIN;
-    }
-    if (events & CONN_WRITE) {
-        ee.events |= EPOLLOUT;
-    }
-    ee.data.ptr = conn;
-    if (epoll_ctl(net_loop->efd, EPOLL_CTL_ADD, conn->sock, &ee)) {
-        LOG(LOG_ERROR, "efd=%d conn=%d add error: %s\n", net_loop->efd, conn->sock, strerror(errno));
-        assert(0);
-        return -1;
-    }
-    net_loop->event_add++;
-    return 0;
-}
-
-int net_loop_event_mod(struct net_loop_t *net_loop, struct conn_t *conn, uint32_t events)
+int net_thread_event_add(struct net_thread_t *net_thread, struct conn_t *conn, uint32_t events)
 {
     struct epoll_event ee;
 
@@ -465,94 +444,115 @@ int net_loop_event_mod(struct net_loop_t *net_loop, struct conn_t *conn, uint32_
         ee.events |= EPOLLOUT;
     }
     ee.data.ptr = conn;
-    if (epoll_ctl(net_loop->efd, EPOLL_CTL_MOD, conn->sock, &ee)) {
-        LOG(LOG_ERROR, "efd=%d conn=%d mod error: %s\n", net_loop->efd, conn->sock, strerror(errno));
+    if (epoll_ctl(net_thread->efd, EPOLL_CTL_ADD, conn->sock, &ee)) {
+        LOG(LOG_ERROR, "efd=%d conn=%d add error: %s\n", net_thread->efd, conn->sock, strerror(errno));
         assert(0);
         return -1;
     }
-    net_loop->event_mod++;
+    net_thread->event_add++;
     return 0;
 }
 
-int net_loop_event_del(struct net_loop_t *net_loop, struct conn_t *conn)
+int net_thread_event_mod(struct net_thread_t *net_thread, struct conn_t *conn, uint32_t events)
+{
+    struct epoll_event ee;
+
+    ee.events = EPOLLET;
+    if (events & CONN_READ) {
+        ee.events |= EPOLLIN;
+    }
+    if (events & CONN_WRITE) {
+        ee.events |= EPOLLOUT;
+    }
+    ee.data.ptr = conn;
+    if (epoll_ctl(net_thread->efd, EPOLL_CTL_MOD, conn->sock, &ee)) {
+        LOG(LOG_ERROR, "efd=%d conn=%d mod error: %s\n", net_thread->efd, conn->sock, strerror(errno));
+        assert(0);
+        return -1;
+    }
+    net_thread->event_mod++;
+    return 0;
+}
+
+int net_thread_event_del(struct net_thread_t *net_thread, struct conn_t *conn)
 {
     struct epoll_event ee;
 
     ee.events = 0;
     ee.data.ptr = NULL;
-    if (epoll_ctl(net_loop->efd, EPOLL_CTL_DEL, conn->sock, &ee)) {
-        LOG(LOG_ERROR, "efd=%d conn=%d del error: %s\n", net_loop->efd, conn->sock, strerror(errno));
+    if (epoll_ctl(net_thread->efd, EPOLL_CTL_DEL, conn->sock, &ee)) {
+        LOG(LOG_ERROR, "efd=%d conn=%d del error: %s\n", net_thread->efd, conn->sock, strerror(errno));
         assert(0);
         return -1;
     }
-    net_loop->event_del++;
+    net_thread->event_del++;
     return 0;
 }
 
-int net_loop_event_wait(struct net_loop_t *net_loop)
+int net_thread_event_wait(struct net_thread_t *net_thread)
 {
     struct epoll_event ees[EPOLL_FD_MAX];
     struct conn_t *conn;
     int i, nfds;
 
-    nfds = epoll_wait(net_loop->efd, ees, EPOLL_FD_MAX, net_loop->ready_num > 0 ? 0 : 100);
+    nfds = epoll_wait(net_thread->efd, ees, EPOLL_FD_MAX, net_thread->ready_num > 0 ? 0 : 100);
     for (i = 0; i < nfds; i++) {
         conn = ees[i].data.ptr;
         if (ees[i].events & (EPOLLIN | EPOLLERR | EPOLLHUP)) {
             conn->flags.read_ready = 1;
             if (conn->flags.read_enable && !conn->flags.in_ready_list) {
-                list_add_tail(&conn->ready_node, &net_loop->ready_list);
+                list_add_tail(&conn->ready_node, &net_thread->ready_list);
                 conn->flags.in_ready_list = 1;
-                net_loop->ready_num++;
+                net_thread->ready_num++;
             }
         }
         if (ees[i].events & (EPOLLOUT | EPOLLERR | EPOLLHUP)) {
             conn->flags.write_ready = 1;
             if (conn->flags.write_enable && !conn->flags.in_ready_list) {
-                list_add_tail(&conn->ready_node, &net_loop->ready_list);
+                list_add_tail(&conn->ready_node, &net_thread->ready_list);
                 conn->flags.in_ready_list = 1;
-                net_loop->ready_num++;
+                net_thread->ready_num++;
             }
         }
     }
     return nfds;
 }
 
-int net_loop_event_clean(struct net_loop_t *net_loop)
+int net_thread_event_clean(struct net_thread_t *net_thread)
 {
-    LOG(LOG_INFO, "%s efd %d close\n", net_loop->name, net_loop->efd);
-    close(net_loop->efd);
+    LOG(LOG_INFO, "%s efd %d close\n", net_thread->name, net_thread->efd);
+    close(net_thread->efd);
     return 0;
 }
 
-static void net_loop_time_update(struct net_loop_t *net_loop)
+static void net_thread_time_update(struct net_thread_t *net_thread)
 {
     struct timeval tv;
 
     gettimeofday(&tv, NULL);
-    net_loop->time_current = tv.tv_sec * 1000  + tv.tv_usec / 1000;
+    net_thread->time_current = tv.tv_sec * 1000  + tv.tv_usec / 1000;
 }
 
-void net_loop_aio_add(struct aio_t *aio)
+void net_thread_aio_add(struct aio_t *aio)
 {
-    struct net_loop_t *net_loop = aio->net_loop;
+    struct net_thread_t *net_thread = aio->net_thread;
     struct conn_t *conn;
 
-    pthread_mutex_lock(&net_loop->aio_mutex);
-    list_add_tail(&aio->node, &net_loop->aio_list);
-    if (net_loop->signaled) {
+    pthread_mutex_lock(&net_thread->aio_mutex);
+    list_add_tail(&aio->node, &net_thread->aio_list);
+    if (net_thread->signaled) {
         conn = NULL;
     } else {
-        net_loop->signaled = 1;
-        conn = net_loop->conns[1];
+        net_thread->signaled = 1;
+        conn = net_thread->conns[1];
     }
-    pthread_mutex_unlock(&net_loop->aio_mutex);
+    pthread_mutex_unlock(&net_thread->aio_mutex);
     if (conn) {
         write(conn->sock, "1", 1);
     }
 }
 
-void net_loop_aio_call(struct aio_t *aio)
+void net_thread_aio_call(struct aio_t *aio)
 {
     aio_handle_t aio_handle;
 
@@ -561,9 +561,9 @@ void net_loop_aio_call(struct aio_t *aio)
     aio_handle(aio);
 }
 
-static void net_loop_pipe_read(struct conn_t *conn)
+static void net_thread_pipe_read(struct conn_t *conn)
 {
-    struct net_loop_t *net_loop = conn->net_loop;
+    struct net_thread_t *net_thread = conn->net_thread;
     char buf[4096];
     ssize_t n;
 
@@ -572,7 +572,7 @@ static void net_loop_pipe_read(struct conn_t *conn)
         LOG(LOG_DEBUG, "sock=%d read=%zd\n", conn->sock, n);
         conn_enable(conn, CONN_READ);
     } else if(n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-        net_loop->signaled = 0;
+        net_thread->signaled = 0;
         conn_ready_unset(conn, CONN_READ);
         conn_enable(conn, CONN_READ);
     } else {
@@ -580,64 +580,64 @@ static void net_loop_pipe_read(struct conn_t *conn)
     }
 }
 
-int net_loop_init(struct net_loop_t *net_loop)
+int net_thread_init(struct net_thread_t *net_thread)
 {
     int fds[2];
     struct conn_t *conn;
 
-    if (net_loop_event_init(net_loop)) {
-        LOG(LOG_ERROR, "%s net_loop_event_init error: %s\n", net_loop->name, strerror(errno));
+    if (net_thread_event_init(net_thread)) {
+        LOG(LOG_ERROR, "%s net_thread_event_init error: %s\n", net_thread->name, strerror(errno));
         return -1;
     }
     if (pipe(fds)) {
-        LOG(LOG_ERROR, "%s pipe error: %s\n", net_loop->name, strerror(errno));
-        close(net_loop->efd);
+        LOG(LOG_ERROR, "%s pipe error: %s\n", net_thread->name, strerror(errno));
+        close(net_thread->efd);
         return -1;
     }
-    INIT_LIST_HEAD(&net_loop->ready_list);
-    INIT_LIST_HEAD(&net_loop->aio_list);
-    pthread_mutex_init(&net_loop->aio_mutex, NULL);
-    net_loop->timer_root = RB_ROOT;
-    net_loop->keepalive_root = RB_ROOT;
+    INIT_LIST_HEAD(&net_thread->ready_list);
+    INIT_LIST_HEAD(&net_thread->aio_list);
+    pthread_mutex_init(&net_thread->aio_mutex, NULL);
+    net_thread->timer_root = RB_ROOT;
+    net_thread->keepalive_root = RB_ROOT;
 
     conn = conn_alloc();
     conn->sock = fds[0];
     conn_nonblock(conn);
-    conn->net_loop = net_loop;
-    conn->handle_read = net_loop_pipe_read;
-    net_loop->conns[0] = conn;
+    conn->net_thread = net_thread;
+    conn->handle_read = net_thread_pipe_read;
+    net_thread->conns[0] = conn;
 
     conn = conn_alloc();
     conn->sock = fds[1];
     conn_nonblock(conn);
-    conn->net_loop = net_loop;
-    net_loop->conns[1] = conn;
+    conn->net_thread = net_thread;
+    net_thread->conns[1] = conn;
 
-    LOG(LOG_INFO, "%s efd=%d pipe=(%d %d)\n", net_loop->name, net_loop->efd, fds[0], fds[1]);
-    conn_enable(net_loop->conns[0], CONN_READ);
+    LOG(LOG_INFO, "%s efd=%d pipe=(%d %d)\n", net_thread->name, net_thread->efd, fds[0], fds[1]);
+    conn_enable(net_thread->conns[0], CONN_READ);
     return 0;
 }
 
-void *net_loop_loop(void *data)
+void *net_thread_loop(void *data)
 {
-    struct net_loop_t *net_loop = data;
+    struct net_thread_t *net_thread = data;
     int loop;
     struct list_head_t aio_list;
     struct conn_t *conn;
     struct rb_node *rb_node;
     struct aio_t *aio;
 
-    log_thread_name(net_loop->name);
+    log_thread_name(net_thread->name);
     INIT_LIST_HEAD(&aio_list);
     while (1) {
         loop = 0;
-        net_loop_event_wait(net_loop);
-        net_loop_time_update(net_loop);
-        while (!list_empty(&net_loop->ready_list) && loop++ < 100) {
-            conn = d_list_head(&net_loop->ready_list, struct conn_t, ready_node);
+        net_thread_event_wait(net_thread);
+        net_thread_time_update(net_thread);
+        while (!list_empty(&net_thread->ready_list) && loop++ < 100) {
+            conn = d_list_head(&net_thread->ready_list, struct conn_t, ready_node);
             list_del(&conn->ready_node);
             conn->flags.in_ready_list = 0;
-            net_loop->ready_num--;
+            net_thread->ready_num--;
             conn->flags.lock = 1;
             if (conn->flags.read_enable && conn->flags.read_ready) {
                 conn->handle_read(conn);
@@ -650,28 +650,28 @@ void *net_loop_loop(void *data)
                 conn_free(conn);
             }
         }
-        pthread_mutex_lock(&net_loop->aio_mutex);
-        list_splice_init(&net_loop->aio_list, &aio_list);
-        pthread_mutex_unlock(&net_loop->aio_mutex);
+        pthread_mutex_lock(&net_thread->aio_mutex);
+        list_splice_init(&net_thread->aio_list, &aio_list);
+        pthread_mutex_unlock(&net_thread->aio_mutex);
         while (!list_empty(&aio_list)) {
             aio = d_list_head(&aio_list, struct aio_t, node);
             list_del(&aio->node);
-            net_loop_aio_call(aio);
+            net_thread_aio_call(aio);
         }
-        if (net_loop->time_current - net_loop->timer_last >= TIMER_PERIOD) {
-            while ((rb_node = rb_first(&net_loop->timer_root))) {
+        if (net_thread->time_current - net_thread->timer_last >= TIMER_PERIOD) {
+            while ((rb_node = rb_first(&net_thread->timer_root))) {
                 conn = rb_entry(rb_node, struct conn_t, timer_node);
-                if (net_loop->time_current >= conn->timer_expire) {
+                if (net_thread->time_current >= conn->timer_expire) {
                     conn_timer_unset(conn);
                     conn->handle_timeout(conn);
                 } else {
                     break;
                 }
             }
-            net_loop->timer_last = net_loop->time_current;
+            net_thread->timer_last = net_thread->time_current;
         }
-        if (net_loop->exit) {
-            while ((rb_node = rb_first(&net_loop->timer_root))) {
+        if (net_thread->exit) {
+            while ((rb_node = rb_first(&net_thread->timer_root))) {
                 conn = rb_entry(rb_node, struct conn_t, timer_node);
                 conn_timer_unset(conn);
                 conn->handle_timeout(conn);
@@ -682,12 +682,12 @@ void *net_loop_loop(void *data)
     return NULL;
 }
 
-void net_loop_clean(struct net_loop_t *net_loop)
+void net_thread_clean(struct net_thread_t *net_thread)
 {
-    conn_close(net_loop->conns[0]);
-    conn_close(net_loop->conns[1]);
-    net_loop_event_clean(net_loop);
-    pthread_mutex_destroy(&net_loop->aio_mutex);
+    conn_close(net_thread->conns[0]);
+    conn_close(net_thread->conns[1]);
+    net_thread_event_clean(net_thread);
+    pthread_mutex_destroy(&net_thread->aio_mutex);
     LOG(LOG_INFO, "event_add=%"PRId64" event_mod=%"PRId64" event_del=%"PRId64"\n",
-            net_loop->event_add, net_loop->event_mod, net_loop->event_del);
+            net_thread->event_add, net_thread->event_mod, net_thread->event_del);
 }

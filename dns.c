@@ -25,7 +25,7 @@ struct dns_cache_table_t {
 };
 
 struct dns_client_t {
-    struct net_loop_t *net_loop;
+    struct net_thread_t *net_thread;
     struct conn_t *conn;
     struct dns_cache_t *dns_cache;
     struct list_head_t aio_list;//callback list need mutex
@@ -72,7 +72,7 @@ static void dns_cache_free(struct dns_cache_t *dns_cache);
 static struct dns_cache_t* dns_cache_table_lookup(const void *host);
 static int dns_cache_table_insert(struct dns_cache_t *dns_cache);
 static int dns_cache_table_erase(struct dns_cache_t *dns_cache);
-static void dns_client_create(struct dns_cache_t *dns_cache, struct net_loop_t *net_loop);
+static void dns_client_create(struct dns_cache_t *dns_cache, struct net_thread_t *net_thread);
 static void dns_client_connect(struct dns_client_t *dns_client);
 static void dns_client_read(struct conn_t *conn);
 static void dns_client_write(struct conn_t *conn);
@@ -167,13 +167,13 @@ static int dns_cache_table_erase(struct dns_cache_t *dns_cache)
     return 0;
 }
 
-static void dns_client_create(struct dns_cache_t *dns_cache, struct net_loop_t *net_loop)
+static void dns_client_create(struct dns_cache_t *dns_cache, struct net_thread_t *net_thread)
 {
     struct dns_client_t *dns_client = NULL;
 
     dns_cache->dns_client = dns_client = mem_malloc(sizeof(struct dns_client_t));
     memset(dns_client, 0, sizeof(struct dns_client_t));
-    dns_client->net_loop = net_loop;
+    dns_client->net_thread = net_thread;
     dns_client->dns_cache = dns_cache;
     INIT_LIST_HEAD(&dns_client->aio_list);
 }
@@ -189,7 +189,7 @@ static void dns_client_connect(struct dns_client_t *dns_client)
         dns_client->conn = conn = conn_alloc();
         conn->sock = sock;
         conn->peer_addr = dns_addr;
-        conn->net_loop = dns_client->net_loop;
+        conn->net_thread = dns_client->net_thread;
         conn_nonblock(conn);
         conn->handle_read = dns_client_read;
         conn->handle_write = dns_client_write;
@@ -305,7 +305,7 @@ static void dns_client_timeout(struct conn_t *conn)
 
 static void dns_client_close(struct dns_client_t *dns_client, int error)
 {
-    struct net_loop_t *net_loop = dns_client->net_loop;
+    struct net_thread_t *net_thread = dns_client->net_thread;
     struct dns_cache_t *dns_cache = dns_client->dns_cache;
     struct aio_t *aio;
 
@@ -327,10 +327,10 @@ static void dns_client_close(struct dns_client_t *dns_client, int error)
         aio = d_list_head(&dns_client->aio_list, struct aio_t, node);
         list_del(&aio->node);
         aio->extra = dns_cache;
-        if (net_loop == aio->net_loop) {
-            net_loop_aio_call(aio);
+        if (net_thread == aio->net_thread) {
+            net_thread_aio_call(aio);
         } else {
-            net_loop_aio_add(aio);
+            net_thread_aio_add(aio);
         }
     }
     mem_free(dns_client);
@@ -817,7 +817,7 @@ void dns_cache_table_query(struct aio_t *aio, const char *host)
     if (dns_cache == NULL) {
         dns_cache = dns_cache_alloc(host);
         dns_cache_table_insert(dns_cache);
-        dns_client_create(dns_cache, aio->net_loop);
+        dns_client_create(dns_cache, aio->net_thread);
         query = 1;
     }
     dns_client = dns_cache->dns_client;
@@ -830,7 +830,7 @@ void dns_cache_table_query(struct aio_t *aio, const char *host)
     dns_cache->lock++;
     pthread_mutex_unlock(&dns_cache_table.mutex);
     if (aio->extra) {
-        net_loop_aio_call(aio);
+        net_thread_aio_call(aio);
     } else {
         LOG(LOG_DEBUG, "dns query %s wait\n", host);
     }

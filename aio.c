@@ -29,19 +29,19 @@ int aio_busy(struct aio_t *aio)
     return 0;
 }
 
-int aio_loop_init(struct aio_loop_t *aio_loop)
+int aio_thread_init(struct aio_thread_t *aio_thread)
 {
-    LOG(LOG_INFO, "%s init\n", aio_loop->name);
+    LOG(LOG_INFO, "%s init\n", aio_thread->name);
     return 0;
 }
 
-void *aio_loop_loop(void *data)
+void *aio_thread_loop(void *data)
 {
-    struct aio_loop_t *aio_loop = data;
+    struct aio_thread_t *aio_thread = data;
     struct aio_t *aio;
 
-    log_thread_name(aio_loop->name);
-    while (!aio_loop->exit) {
+    log_thread_name(aio_thread->name);
+    while (!aio_thread->exit) {
         pthread_mutex_lock(&aio_mutex);
         if (list_empty(&aio_list)) {
             pthread_cond_wait(&aio_cond, &aio_mutex);
@@ -59,12 +59,12 @@ void *aio_loop_loop(void *data)
     return NULL;
 }
 
-void aio_loop_clean(struct aio_loop_t *aio_loop)
+void aio_thread_clean(struct aio_thread_t *aio_thread)
 {
-    LOG(LOG_INFO, "%s clean\n", aio_loop->name);
+    LOG(LOG_INFO, "%s clean\n", aio_thread->name);
 }
 
-void aio_loop_signal()
+void aio_thread_signal()
 {
     pthread_mutex_lock(&aio_mutex);
     pthread_cond_broadcast(&aio_cond);

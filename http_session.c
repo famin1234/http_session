@@ -166,7 +166,7 @@ static void http_session_accept(struct conn_t *conn_listen)
         conn = conn_alloc();
         conn->sock = sock;
         conn->peer_addr = conn_addr;
-        conn->net_loop = conn_listen->net_loop;
+        conn->net_thread = conn_listen->net_thread;
         conn_nonblock(conn);
         http_session_create(conn, HTTP_CLIENT_ACCEPT);
     } else if(sock == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
@@ -185,7 +185,7 @@ static void http_session_create(struct conn_t *conn, int type)
 
     http_session = mem_malloc(sizeof(struct http_session_t));
     memset(http_session, 0, sizeof(struct http_session_t));
-    http_session->aio.net_loop = conn->net_loop;
+    http_session->aio.net_thread = conn->net_thread;
     http_session->aio.data = http_session;
     http_session->conn = conn;
     string_init(&http_session->url, URL_LEN);
@@ -702,7 +702,7 @@ static void http_server_connect(struct http_session_t *http_session, union conn_
     int sock;
     char str[64];
 
-    http_server->conn = conn = conn_keepalive_get(http_session->aio.net_loop, conn_addr);
+    http_server->conn = conn = conn_keepalive_get(http_session->aio.net_thread, conn_addr);
     if (conn) {
         LOG(LOG_INFO, "url=%s sock=%d %s reuse\n", string_buf(&http_session->url), conn->sock, conn_addr_ntop(&conn->peer_addr, str, sizeof(str)));
         http_server_connect_done(http_session, ERR_OK);
@@ -717,7 +717,7 @@ static void http_server_connect(struct http_session_t *http_session, union conn_
     http_server->conn = conn = conn_alloc();
     conn->sock = sock;
     conn->peer_addr = *conn_addr;
-    conn->net_loop = http_session->aio.net_loop;
+    conn->net_thread = http_session->aio.net_thread;
     conn_nonblock(conn);
     conn->handle_read = http_server_header_read;
     conn->handle_write = http_server_connect_check;

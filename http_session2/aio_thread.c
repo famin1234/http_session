@@ -1,7 +1,6 @@
 #include "os.h"
 #include "log.h"
 #include "mem.h"
-#include "action.h"
 #include "aio_thread.h"
 
 struct list_head_t list;
@@ -44,7 +43,7 @@ static void aio_thread_clean(struct aio_thread_t *aio_thread)
     LOG(LOG_INFO, "%s clean\n", aio_thread->name);
 }
 
-int aio_threads_run(int n)
+int aio_threads_create(int n)
 {
     int i;
 

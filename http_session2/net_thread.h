@@ -42,12 +42,6 @@ union conn_addr_t {
     struct sockaddr_in6 in6;
 };
 
-struct net_listen_t {
-    union conn_addr_t conn_addr;
-    conn_handle_t handle;
-    struct list_head_t node;
-};
-
 struct conn_t {
     net_socket_t sock;
     union conn_addr_t peer_addr;
@@ -73,8 +67,6 @@ struct conn_t {
     void *data;
 };
 
-int net_listen_list_add(const char *host, unsigned short port, conn_handle_t handle);
-int net_listen(net_socket_t sock, union conn_addr_t *conn_addr);
 
 int conn_addr_pton(union conn_addr_t *conn_addr, const char *host, unsigned short port);
 const char *conn_addr_ntop(union conn_addr_t *conn_addr, char *buf, socklen_t size);
@@ -103,10 +95,9 @@ int net_thread_event_del(struct net_thread_t *net_thread, struct conn_t *conn);
 int net_thread_event_wait(struct net_thread_t *net_thread);
 int net_thread_event_clean(struct net_thread_t *net_thread);
 
-int net_threads_init(int n);
+int net_listen_list_add(const char *host, unsigned short port, conn_handle_t handle);
+int net_threads_create(int n);
 void net_threads_join();
 void net_threads_exit();
-
-extern struct list_head_t net_listen_list;
 
 #endif

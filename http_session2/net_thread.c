@@ -1,68 +1,59 @@
 #include "os.h"
 #include "log.h"
 #include "mem.h"
-#include "action.h"
 #include "net_thread.h"
 
-struct list_head_t net_listen_list;
+struct listen_t {
+    struct list_head_t node;
+    net_socket_t sock;
+    union conn_addr_t conn_addr;
+    conn_handle_t handle;
+};
+
+struct list_head_t listen_list = LIST_HEAD_INIT(listen_list);
 static struct net_thread_t *net_threads = NULL;
 static int net_threads_num = 0;
 
-int net_init()
-{
-    INIT_LIST_HEAD(&net_listen_list);
-    return 0;
-}
-
-void net_clean()
-{
-    struct net_listen_t *nl;
-
-    while (!list_empty(&net_listen_list)) {
-        nl = d_list_head(&net_listen_list, struct net_listen_t, node);
-        list_del(&nl->node);
-        mem_free(nl);
-    }
-}
-
-int net_listen_list_add(const char *host, unsigned short port, conn_handle_t handle)
-{
-    struct net_listen_t *nl;
-    union conn_addr_t conn_addr;
-
-    if (conn_addr_pton(&conn_addr, host, port) > 0) {
-        nl = mem_malloc(sizeof(struct net_listen_t));
-        nl->conn_addr = conn_addr;
-        nl->handle = handle;
-        list_add_tail(&nl->node, &net_listen_list);
-    } else {
-        LOG(LOG_DEBUG, "%s:%d is not ip\n", host, port);
-        return -1;
-    }
-    return 0;
-}
-
-int net_listen(net_socket_t sock, union conn_addr_t *conn_addr)
+static net_socket_t net_listen(union conn_addr_t *conn_addr)
 {
     int on = 1;
+    char str[64];
+    net_socket_t sock;
+
+    sock = socket(conn_addr->addr.sa_family, SOCK_STREAM, IPPROTO_TCP);
+    if (sock < 0) {
+        LOG(LOG_ERROR, "sock=%d %s error:%s\n", sock, conn_addr_ntop(conn_addr, str, sizeof(str)), strerror(errno));
+        return -1;
+    }
     if (conn_addr->addr.sa_family == AF_INET6) {
         if (setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof(on))) {
+            LOG(LOG_ERROR, "sock=%d %s error:%s\n", sock, conn_addr_ntop(conn_addr, str, sizeof(str)), strerror(errno));
+            close(sock);
             return -1;
         }
     }
     if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on))) {
+        LOG(LOG_ERROR, "sock=%d %s error:%s\n", sock, conn_addr_ntop(conn_addr, str, sizeof(str)), strerror(errno));
+        close(sock);
         return -1;
     }
     if (setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on))) {
+        LOG(LOG_ERROR, "sock=%d %s error:%s\n", sock, conn_addr_ntop(conn_addr, str, sizeof(str)), strerror(errno));
+        close(sock);
         return -1;
     }
     if (bind(sock, &conn_addr->addr, sizeof(union conn_addr_t)) != 0) {
+        LOG(LOG_ERROR, "sock=%d %s error:%s\n", sock, conn_addr_ntop(conn_addr, str, sizeof(str)), strerror(errno));
+        close(sock);
         return -1;
     }
     if (listen(sock, LISTEN_MAX)) {
+        LOG(LOG_ERROR, "sock=%d %s error:%s\n", sock, conn_addr_ntop(conn_addr, str, sizeof(str)), strerror(errno));
+        close(sock);
         return -1;
     }
-    return 0;
+    LOG(LOG_INFO, "sock=%d %s listen ok\n", sock, conn_addr_ntop(conn_addr, str, sizeof(str)));
+    return sock;
 }
 
 int conn_addr_pton(union conn_addr_t *conn_addr, const char *host, unsigned short port)
@@ -667,12 +658,32 @@ static void net_thread_clean(struct net_thread_t *net_thread)
             net_thread->event_add, net_thread->event_mod, net_thread->event_del);
 }
 
-int net_threads_init(int n)
+int net_listen_list_add(const char *host, unsigned short port, conn_handle_t handle)
+{
+    struct listen_t *nl;
+    union conn_addr_t conn_addr;
+    net_socket_t sock;
+
+    if (conn_addr_pton(&conn_addr, host, port) > 0) {
+        sock = net_listen(&conn_addr);
+        if (sock > 0) {
+            nl = mem_malloc(sizeof(struct listen_t));
+            nl->sock = sock;
+            nl->conn_addr = conn_addr;
+            nl->handle = handle;
+            list_add_tail(&nl->node, &listen_list);
+        }
+    } else {
+        LOG(LOG_DEBUG, "%s:%d is not ip\n", host, port);
+        return -1;
+    }
+    return 0;
+}
+
+int net_threads_create(int n)
 {
     struct conn_t *conn;
-    net_socket_t sock;
-    struct net_listen_t *nl;
-    char str[64];
+    struct listen_t *nl;
     int i;
 
     assert(net_threads_num == 0);
@@ -686,38 +697,14 @@ int net_threads_init(int n)
             assert(0);
         }
     }
-    list_for_each_entry(nl, &net_listen_list, node) {
+    list_for_each_entry(nl, &listen_list, node) {
         for (i = 0; i < net_threads_num; i++) {
-            if (i == 0) {
-                sock = socket(nl->conn_addr.addr.sa_family, SOCK_STREAM, IPPROTO_TCP);
-                if (sock < 0) {
-                    LOG(LOG_ERROR, "%s sock=%d %s error:%s\n", net_threads[i].name, sock, conn_addr_ntop(&nl->conn_addr, str, sizeof(str)), strerror(errno));
-                    break;
-                }
-                if (net_listen(sock, &nl->conn_addr)) {
-                    LOG(LOG_ERROR, "%s sock=%d %s listen error: %s\n", net_threads[i].name, sock, conn_addr_ntop(&nl->conn_addr, str, sizeof(str)), strerror(errno));
-                    close(sock);
-                    break;
-                }
-                LOG(LOG_INFO, "%s sock=%d %s listen ok\n", net_threads[i].name, sock, conn_addr_ntop(&nl->conn_addr, str, sizeof(str)));
-            } else {
-                sock = dup(sock);
-                if (sock < 0) {
-                    LOG(LOG_ERROR, "%s sock=%d %s listen dup error: %s\n", net_threads[i].name, sock, conn_addr_ntop(&nl->conn_addr, str, sizeof(str)), strerror(errno));
-                    break;
-                }
-                LOG(LOG_INFO, "%s sock=%d %s listen dup ok\n", net_threads[i].name, sock, conn_addr_ntop(&nl->conn_addr, str, sizeof(str)));
-            }
             conn = conn_alloc();
-            conn->sock = sock;
+            conn->sock = nl->sock;
             conn->peer_addr = nl->conn_addr;
             conn->net_thread = &net_threads[i];
             conn_nonblock(conn);
             conn->handle_read = nl->handle;
-            conn->handle_write = NULL;
-            conn->handle_timeout = conn_close;
-            conn->data = NULL;
-            conn_timer_set(conn, INT64_MAX - net_threads[i].time_current);
             conn_enable(conn, CONN_READ);
         }
     }
@@ -732,6 +719,7 @@ int net_threads_init(int n)
 
 void net_threads_join()
 {
+    struct listen_t *nl;
     int i;
 
     for (i = 0; i < net_threads_num; i++) {
@@ -743,6 +731,13 @@ void net_threads_join()
     mem_free(net_threads);
     net_threads = NULL;
     net_threads_num = 0;
+
+    while (!list_empty(&listen_list)) {
+        nl = d_list_head(&listen_list, struct listen_t, node);
+        list_del(&nl->node);
+        close(nl->sock);
+        mem_free(nl);
+    }
 }
 
 void net_threads_exit()

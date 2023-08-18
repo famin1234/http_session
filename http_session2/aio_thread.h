@@ -8,7 +8,7 @@ struct aio_thread_t {
     int  exit;
 };
 
-int aio_threads_init(int n);
+int aio_threads_create(int n);
 void aio_threads_join();
 void aio_threads_signal();
 void aio_threads_exit();

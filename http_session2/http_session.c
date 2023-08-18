@@ -1315,15 +1315,6 @@ static void http_session_close(struct http_session_t *http_session)
     mem_free(http_session);
 }
 
-enum {
-    HTTP_CACHE_CREATE,
-    HTTP_CACHE_OPEN,
-    HTTP_CACHE_WRITE,
-    HTTP_CACHE_READ,
-    HTTP_CACHE_CLOSE,
-    HTTP_CACHE_DELETE,
-};
-
 struct http_cache_info_t {
     pthread_mutex_t mutex;
     char *url;
@@ -1341,29 +1332,5 @@ struct http_cache_t {
 
 struct http_cache_client_t {
     struct http_cache_t *cache;
-    int op;
     int ret;
 };
-
-void http_cache_client_exec(struct action_t *action)
-{
-    struct http_cache_client_t *cache_client = action->data;
-    struct http_cache_t *cache = cache_client->cache;
-    struct http_cache_info_t *info = cache->info;
-
-    switch (cache_client->op) {
-        case HTTP_CACHE_CREATE:
-            pthread_mutex_lock(&info->mutex);
-            pthread_mutex_unlock(&info->mutex);
-            break;
-        case HTTP_CACHE_OPEN:
-            break;
-        case HTTP_CACHE_READ:
-            break;
-        case HTTP_CACHE_WRITE:
-            break;
-        default:
-            break;
-    }
-}
-

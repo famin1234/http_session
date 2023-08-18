@@ -10,7 +10,8 @@ struct listen_t {
     conn_handle_t handle;
 };
 
-struct list_head_t listen_list = LIST_HEAD_INIT(listen_list);
+static struct list_head_t listen_list = LIST_HEAD_INIT(listen_list);
+static int listen_list_num = 0;
 static struct net_thread_t *net_threads = NULL;
 static int net_threads_num = 0;
 
@@ -142,12 +143,17 @@ void conn_free(struct conn_t *conn)
     mem_free(conn);
 }
 
-void conn_close(struct conn_t *conn)
+void conn_stop(struct conn_t *conn)
 {
     assert(conn->sock > 0);
-    LOG(LOG_DEBUG, "sock=%d close\n", conn->sock);
     conn_disable(conn, CONN_READ | CONN_WRITE);
     conn_timer_unset(conn);
+}
+
+void conn_close(struct conn_t *conn)
+{
+    conn_stop(conn);
+    LOG(LOG_DEBUG, "sock=%d close\n", conn->sock);
     close(conn->sock);
     if (conn->flags.lock) {
         conn->flags.closed = 1;
@@ -574,7 +580,7 @@ void net_thread_action_callback(struct net_thread_t *current, struct action_t *a
         }
         pthread_mutex_unlock(&to->mutex);
         if (signaled) {
-            write(to->conns[1]->sock, "1", 1);
+            write(to->pipe_conns[1]->sock, "1", 1);
         }
     }
 }
@@ -582,6 +588,7 @@ void net_thread_action_callback(struct net_thread_t *current, struct action_t *a
 static int net_thread_init(struct net_thread_t *net_thread)
 {
     int fds[2];
+    struct listen_t *nl;
     struct conn_t *conn;
 
     if (net_thread_event_init(net_thread)) {
@@ -593,27 +600,37 @@ static int net_thread_init(struct net_thread_t *net_thread)
         close(net_thread->efd);
         return -1;
     }
+    INIT_LIST_HEAD(&net_thread->listen_list);
     INIT_LIST_HEAD(&net_thread->ready_list);
     INIT_LIST_HEAD(&net_thread->list);
     pthread_mutex_init(&net_thread->mutex, NULL);
     net_thread->timer_root = RB_ROOT;
     net_thread->keepalive_root = RB_ROOT;
 
-    conn = conn_alloc();
+    net_thread->pipe_conns[0] = conn = conn_alloc();
     conn->sock = fds[0];
     conn_nonblock(conn);
     conn->net_thread = net_thread;
     conn->handle_read = net_thread_pipe_read;
-    net_thread->conns[0] = conn;
 
-    conn = conn_alloc();
+    net_thread->pipe_conns[1] = conn = conn_alloc();
     conn->sock = fds[1];
     conn_nonblock(conn);
     conn->net_thread = net_thread;
-    net_thread->conns[1] = conn;
 
     LOG(LOG_INFO, "%s efd=%d pipe=(%d %d)\n", net_thread->name, net_thread->efd, fds[0], fds[1]);
-    conn_enable(net_thread->conns[0], CONN_READ);
+    conn_enable(net_thread->pipe_conns[0], CONN_READ);
+
+    list_for_each_entry(nl, &listen_list, node) {
+        conn = conn_alloc();
+        list_add_tail(&conn->listen_node, &net_thread->listen_list);
+        conn->sock = nl->sock;
+        conn->peer_addr = nl->conn_addr;
+        conn->net_thread = net_thread;
+        conn_nonblock(conn);
+        conn->handle_read = nl->handle;
+        conn_enable(conn, CONN_READ);
+    }
     return 0;
 }
 
@@ -683,8 +700,16 @@ static void *net_thread_loop(void *data)
 
 static void net_thread_clean(struct net_thread_t *net_thread)
 {
-    conn_close(net_thread->conns[0]);
-    conn_close(net_thread->conns[1]);
+    struct conn_t *conn;
+
+    conn_close(net_thread->pipe_conns[0]);
+    conn_close(net_thread->pipe_conns[1]);
+    while (!list_empty(&net_thread->listen_list)) {
+        conn = d_list_head(&net_thread->listen_list, struct conn_t, listen_node);
+        list_del(&conn->listen_node);
+        conn_stop(conn);
+        conn_free(conn);
+    }
     net_thread_event_clean(net_thread);
     pthread_mutex_destroy(&net_thread->mutex);
     LOG(LOG_INFO, "event_add=%"PRId64" event_mod=%"PRId64" event_del=%"PRId64"\n",
@@ -705,6 +730,7 @@ int net_listen_list_add(const char *host, unsigned short port, conn_handle_t han
             nl->conn_addr = conn_addr;
             nl->handle = handle;
             list_add_tail(&nl->node, &listen_list);
+            listen_list_num++;
         }
     } else {
         LOG(LOG_DEBUG, "%s:%d is not ip\n", host, port);
@@ -715,8 +741,6 @@ int net_listen_list_add(const char *host, unsigned short port, conn_handle_t han
 
 int net_threads_create(int n)
 {
-    struct conn_t *conn;
-    struct listen_t *nl;
     int i;
 
     assert(net_threads_num == 0);
@@ -728,17 +752,6 @@ int net_threads_create(int n)
         if (net_thread_init(&net_threads[i])) {
             LOG(LOG_ERROR, "%s net_thread_init error\n", net_threads[i].name);
             assert(0);
-        }
-    }
-    list_for_each_entry(nl, &listen_list, node) {
-        for (i = 0; i < net_threads_num; i++) {
-            conn = conn_alloc();
-            conn->sock = nl->sock;
-            conn->peer_addr = nl->conn_addr;
-            conn->net_thread = &net_threads[i];
-            conn_nonblock(conn);
-            conn->handle_read = nl->handle;
-            conn_enable(conn, CONN_READ);
         }
     }
     for (i = 0; i < net_threads_num; i++) {
@@ -771,6 +784,7 @@ void net_threads_join()
         close(nl->sock);
         mem_free(nl);
     }
+    listen_list_num = 0;
 }
 
 void net_threads_exit()

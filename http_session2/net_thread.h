@@ -20,7 +20,8 @@ struct net_thread_t {
     char               name[64];
     int                exit;
     int                efd;
-    struct conn_t      *conns[2];
+    struct conn_t      *pipe_conns[2];
+    struct list_head_t listen_list;
     struct list_head_t ready_list;
     int                ready_num;
     struct list_head_t list;
@@ -46,8 +47,11 @@ struct conn_t {
     net_socket_t sock;
     union conn_addr_t peer_addr;
     struct net_thread_t *net_thread;
-    struct list_head_t ready_node;
-    struct rb_node keepalive_node;
+    struct list_head_t listen_node;
+    union {
+        struct list_head_t ready_node;
+        struct rb_node keepalive_node;
+    };
     struct rb_node timer_node;
     int64_t timer_expire;
     uint32_t events;
@@ -74,6 +78,7 @@ uint16_t conn_addr_port(union conn_addr_t *conn_addr);
 int conn_addr_compare(const union conn_addr_t *conn_addr1, const union conn_addr_t *conn_addr2);
 
 struct conn_t *conn_alloc(void);
+void conn_stop(struct conn_t *conn);
 void conn_close(struct conn_t *conn);
 void conn_free(struct conn_t *conn);
 int conn_nonblock(struct conn_t *conn);

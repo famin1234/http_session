@@ -546,6 +546,39 @@ static void net_thread_pipe_read(struct conn_t *conn)
     }
 }
 
+static void net_thread_action_handle(struct action_t *action)
+{
+    action_handle_t handle;
+
+    handle = action->handle;
+    action->handle = NULL;
+    handle(action);
+}
+
+void net_thread_action_callback(struct net_thread_t *current, struct action_t *action)
+{
+    int signaled = 0;
+    struct net_thread_t *to;
+
+    if (current == action->net_thread) {
+        action->handle = action->callback;
+        action->callback = NULL;
+        net_thread_action_handle(action);
+    } else {
+        to = action->net_thread;
+        pthread_mutex_lock(&to->mutex);
+        list_add_tail(&action->node, &to->list);
+        if (!to->signaled) {
+            to->signaled = 1;
+            signaled = 1;
+        }
+        pthread_mutex_unlock(&to->mutex);
+        if (signaled) {
+            write(to->conns[1]->sock, "1", 1);
+        }
+    }
+}
+
 static int net_thread_init(struct net_thread_t *net_thread)
 {
     int fds[2];
@@ -622,7 +655,7 @@ static void *net_thread_loop(void *data)
         while (!list_empty(&list)) {
             action = d_list_head(&list, struct action_t, node);
             list_del(&action->node);
-            action->handle(action);
+            net_thread_action_handle(action);
         }
         if (net_thread->time_current - net_thread->timer_last >= TIMER_PERIOD) {
             while ((rb_node = rb_first(&net_thread->timer_root))) {
@@ -748,3 +781,4 @@ void net_threads_exit()
         net_threads[i].exit = 1;
     }
 }
+

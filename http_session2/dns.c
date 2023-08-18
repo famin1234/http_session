@@ -327,11 +327,7 @@ static void dns_client_close(struct dns_client_t *dns_client, int error)
         action = d_list_head(&dns_client->action_list, struct action_t, node);
         list_del(&action->node);
         action->extra = dns_cache;
-        if (net_thread == action->net_thread) {
-            net_thread_action_call(action);
-        } else {
-            net_thread_action_add(action);
-        }
+        net_thread_action_callback(net_thread, action);
     }
     mem_free(dns_client);
 }
@@ -830,7 +826,7 @@ void dns_cache_table_query(struct action_t *action, const char *host)
     dns_cache->lock++;
     pthread_mutex_unlock(&dns_cache_table.mutex);
     if (action->extra) {
-        net_thread_action_call(action);
+        net_thread_action_callback(action->net_thread, action);
     } else {
         LOG(LOG_DEBUG, "dns query %s wait\n", host);
     }

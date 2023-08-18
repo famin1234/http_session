@@ -96,8 +96,11 @@ int net_thread_event_wait(struct net_thread_t *net_thread);
 int net_thread_event_clean(struct net_thread_t *net_thread);
 
 int net_listen_list_add(const char *host, unsigned short port, conn_handle_t handle);
+void net_thread_action_callback(struct net_thread_t *net_thread, struct action_t *action);
 int net_threads_create(int n);
 void net_threads_join();
 void net_threads_exit();
 
+void net_thread_action_add(struct action_t *action);
+void net_thread_action_call(struct action_t *action);
 #endif

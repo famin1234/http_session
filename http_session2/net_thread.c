@@ -573,6 +573,8 @@ void net_thread_action_callback(struct net_thread_t *current, struct action_t *a
     } else {
         to = action->net_thread;
         pthread_mutex_lock(&to->mutex);
+        action->handle = action->callback;
+        action->callback = NULL;
         list_add_tail(&action->node, &to->list);
         if (!to->signaled) {
             to->signaled = 1;
@@ -766,6 +768,7 @@ int net_threads_create(int n)
 void net_threads_join()
 {
     struct listen_t *nl;
+    char str[64];
     int i;
 
     for (i = 0; i < net_threads_num; i++) {
@@ -781,6 +784,7 @@ void net_threads_join()
     while (!list_empty(&listen_list)) {
         nl = d_list_head(&listen_list, struct listen_t, node);
         list_del(&nl->node);
+        LOG(LOG_INFO, "sock=%d %s listen close\n", nl->sock, conn_addr_ntop(&nl->conn_addr, str, sizeof(str)));
         close(nl->sock);
         mem_free(nl);
     }

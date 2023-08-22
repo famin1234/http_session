@@ -201,7 +201,7 @@ void conn_enable(struct conn_t *conn, int flags)
             if (!conn->flags.in_ready_list) {
                 list_add_tail(&conn->ready_node, &net_thread->ready_list);
                 conn->flags.in_ready_list = 1;
-                net_thread->ready_num++;
+                net_thread->ready_list_num++;
             }
         } else {
             events |= CONN_READ;
@@ -213,7 +213,7 @@ void conn_enable(struct conn_t *conn, int flags)
             if (!conn->flags.in_ready_list) {
                 list_add_tail(&conn->ready_node, &net_thread->ready_list);
                 conn->flags.in_ready_list = 1;
-                net_thread->ready_num++;
+                net_thread->ready_list_num++;
             }
         } else {
             events |= CONN_WRITE;
@@ -260,7 +260,7 @@ void conn_disable(struct conn_t *conn, int flags)
         if (conn->flags.in_ready_list) {
             list_del(&conn->ready_node);
             conn->flags.in_ready_list = 0;
-            net_thread->ready_num--;
+            net_thread->ready_list_num--;
         }
     }
 }
@@ -495,7 +495,7 @@ int net_thread_event_wait(struct net_thread_t *net_thread)
     struct conn_t *conn;
     int i, nfds;
 
-    nfds = epoll_wait(net_thread->efd, ees, EPOLL_FD_MAX, net_thread->ready_num > 0 ? 0 : 100);
+    nfds = epoll_wait(net_thread->efd, ees, EPOLL_FD_MAX, net_thread->ready_list_num > 0 ? 0 : 100);
     for (i = 0; i < nfds; i++) {
         conn = ees[i].data.ptr;
         if (ees[i].events & (EPOLLIN | EPOLLERR | EPOLLHUP)) {
@@ -503,7 +503,7 @@ int net_thread_event_wait(struct net_thread_t *net_thread)
             if (conn->flags.read_enable && !conn->flags.in_ready_list) {
                 list_add_tail(&conn->ready_node, &net_thread->ready_list);
                 conn->flags.in_ready_list = 1;
-                net_thread->ready_num++;
+                net_thread->ready_list_num++;
             }
         }
         if (ees[i].events & (EPOLLOUT | EPOLLERR | EPOLLHUP)) {
@@ -511,7 +511,7 @@ int net_thread_event_wait(struct net_thread_t *net_thread)
             if (conn->flags.write_enable && !conn->flags.in_ready_list) {
                 list_add_tail(&conn->ready_node, &net_thread->ready_list);
                 conn->flags.in_ready_list = 1;
-                net_thread->ready_num++;
+                net_thread->ready_list_num++;
             }
         }
     }
@@ -575,7 +575,7 @@ void net_thread_action_callback(struct net_thread_t *current, struct action_t *a
         pthread_mutex_lock(&to->mutex);
         action->handle = action->callback;
         action->callback = NULL;
-        list_add_tail(&action->node, &to->list);
+        list_add_tail(&action->node, &to->callback_list);
         if (!to->signaled) {
             to->signaled = 1;
             signaled = 1;
@@ -602,10 +602,11 @@ static int net_thread_init(struct net_thread_t *net_thread)
         close(net_thread->efd);
         return -1;
     }
+    pthread_mutex_init(&net_thread->mutex, NULL);
+    INIT_LIST_HEAD(&net_thread->callback_list);
+    INIT_LIST_HEAD(&net_thread->action_list);
     INIT_LIST_HEAD(&net_thread->listen_list);
     INIT_LIST_HEAD(&net_thread->ready_list);
-    INIT_LIST_HEAD(&net_thread->list);
-    pthread_mutex_init(&net_thread->mutex, NULL);
     net_thread->timer_root = RB_ROOT;
     net_thread->keepalive_root = RB_ROOT;
 
@@ -640,13 +641,13 @@ static void *net_thread_loop(void *data)
 {
     struct net_thread_t *net_thread = data;
     int loop;
-    struct list_head_t list;
+    struct list_head_t action_list;
     struct conn_t *conn;
     struct rb_node *rb_node;
     struct action_t *action;
 
     log_thread_name(net_thread->name);
-    INIT_LIST_HEAD(&list);
+    INIT_LIST_HEAD(&action_list);
     while (1) {
         loop = 0;
         net_thread_event_wait(net_thread);
@@ -655,7 +656,7 @@ static void *net_thread_loop(void *data)
             conn = d_list_head(&net_thread->ready_list, struct conn_t, ready_node);
             list_del(&conn->ready_node);
             conn->flags.in_ready_list = 0;
-            net_thread->ready_num--;
+            net_thread->ready_list_num--;
             conn->flags.lock = 1;
             if (conn->flags.read_enable && conn->flags.read_ready) {
                 conn->handle_read(conn);
@@ -669,10 +670,10 @@ static void *net_thread_loop(void *data)
             }
         }
         pthread_mutex_lock(&net_thread->mutex);
-        list_splice_init(&net_thread->list, &list);
+        list_splice_init(&net_thread->callback_list, &action_list);
         pthread_mutex_unlock(&net_thread->mutex);
-        while (!list_empty(&list)) {
-            action = d_list_head(&list, struct action_t, node);
+        while (!list_empty(&action_list)) {
+            action = d_list_head(&action_list, struct action_t, node);
             list_del(&action->node);
             net_thread_action_handle(action);
         }

@@ -21,11 +21,12 @@ struct net_thread_t {
     int                exit;
     int                efd;
     struct conn_t      *pipe_conns[2];
+    pthread_mutex_t    mutex;
+    struct list_head_t callback_list;
+    struct list_head_t action_list;
     struct list_head_t listen_list;
     struct list_head_t ready_list;
-    int                ready_num;
-    struct list_head_t list;
-    pthread_mutex_t    mutex;
+    int                ready_list_num;
     int                signaled;
     struct rb_root     timer_root;
     struct rb_root     keepalive_root;

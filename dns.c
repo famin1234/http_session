@@ -1,6 +1,6 @@
+#include "os.h"
 #include "mem.h"
-#include "net.h"
-#include "aio.h"
+#include "net_thread.h"
 #include "log.h"
 #include "dns.h"
 
@@ -28,7 +28,7 @@ struct dns_client_t {
     struct net_thread_t *net_thread;
     struct conn_t *conn;
     struct dns_cache_t *dns_cache;
-    struct list_head_t aio_list;//callback list need mutex
+    struct list_head_t action_list;//callback list need mutex
     uint16_t id;
 };
 
@@ -175,7 +175,7 @@ static void dns_client_create(struct dns_cache_t *dns_cache, struct net_thread_t
     memset(dns_client, 0, sizeof(struct dns_client_t));
     dns_client->net_thread = net_thread;
     dns_client->dns_cache = dns_cache;
-    INIT_LIST_HEAD(&dns_client->aio_list);
+    INIT_LIST_HEAD(&dns_client->action_list);
 }
 
 static void dns_client_connect(struct dns_client_t *dns_client)
@@ -307,7 +307,7 @@ static void dns_client_close(struct dns_client_t *dns_client, int error)
 {
     struct net_thread_t *net_thread = dns_client->net_thread;
     struct dns_cache_t *dns_cache = dns_client->dns_cache;
-    struct aio_t *aio;
+    struct action_t *action;
 
     if (dns_client->conn) {
         conn_close(dns_client->conn);
@@ -323,15 +323,11 @@ static void dns_client_close(struct dns_client_t *dns_client, int error)
     } else {
         pthread_mutex_unlock(&dns_cache_table.mutex);
     }
-    while (!list_empty(&dns_client->aio_list)) {
-        aio = d_list_head(&dns_client->aio_list, struct aio_t, node);
-        list_del(&aio->node);
-        aio->extra = dns_cache;
-        if (net_thread == aio->net_thread) {
-            net_thread_aio_call(aio);
-        } else {
-            net_thread_aio_add(aio);
-        }
+    while (!list_empty(&dns_client->action_list)) {
+        action = d_list_head(&dns_client->action_list, struct action_t, node);
+        list_del(&action->node);
+        action->extra = dns_cache;
+        net_thread_action_callback(net_thread, action);
     }
     mem_free(dns_client);
 }
@@ -806,7 +802,7 @@ void dns_clean()
     memset(&dns_cache_table, 0, sizeof(struct dns_cache_table_t));
 }
 
-void dns_cache_table_query(struct aio_t *aio, const char *host)
+void dns_cache_table_query(struct action_t *action, const char *host)
 {
     struct dns_cache_t *dns_cache;
     struct dns_client_t *dns_client;
@@ -817,20 +813,20 @@ void dns_cache_table_query(struct aio_t *aio, const char *host)
     if (dns_cache == NULL) {
         dns_cache = dns_cache_alloc(host);
         dns_cache_table_insert(dns_cache);
-        dns_client_create(dns_cache, aio->net_thread);
+        dns_client_create(dns_cache, action->net_thread);
         query = 1;
     }
     dns_client = dns_cache->dns_client;
     if (dns_client) {
-        aio->extra = NULL;
-        list_add_tail(&aio->node, &dns_client->aio_list);
+        action->extra = NULL;
+        list_add_tail(&action->node, &dns_client->action_list);
     } else {
-        aio->extra = dns_cache;
+        action->extra = dns_cache;
     }
     dns_cache->lock++;
     pthread_mutex_unlock(&dns_cache_table.mutex);
-    if (aio->extra) {
-        net_thread_aio_call(aio);
+    if (action->extra) {
+        net_thread_action_callback(action->net_thread, action);
     } else {
         LOG(LOG_DEBUG, "dns query %s wait\n", host);
     }
@@ -839,9 +835,9 @@ void dns_cache_table_query(struct aio_t *aio, const char *host)
     }
 }
 
-void dns_cache_table_unquery(struct aio_t *aio)
+void dns_cache_table_unquery(struct action_t *action)
 {
-    struct dns_cache_t *dns_cache = aio->extra;
+    struct dns_cache_t *dns_cache = action->extra;
 
     pthread_mutex_lock(&dns_cache_table.mutex);
     dns_cache->lock--;
@@ -852,5 +848,5 @@ void dns_cache_table_unquery(struct aio_t *aio)
     } else {
         pthread_mutex_unlock(&dns_cache_table.mutex);
     }
-    aio->extra = NULL;
+    action->extra = NULL;
 }

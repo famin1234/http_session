@@ -26,4 +26,22 @@
 #include "rbtree.h"
 #include "atomic_stack.h"
 
+struct action_t;
+typedef void (*action_handle_t)(struct action_t *);
+struct action_t {
+    struct list_head_t node;
+    action_handle_t handle;
+    action_handle_t callback;
+    void *net_thread;
+    void *data;
+    void *extra;
+};
+
+struct module_t {
+    int (*module_init)(struct module_t *module);
+    int (*module_clean)(struct module_t *module);
+    int (*net_thread_init)(struct module_t *module);
+    int (*net_thread_clean)(struct module_t *module);
+};
+
 #endif

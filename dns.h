@@ -2,7 +2,6 @@
 #define DNS_H
 
 #include "os.h"
-#include "aio.h"
 
 struct dns_cache_t {
     int lock;
@@ -27,7 +26,7 @@ struct dns_addr_t {
 void dns_init();
 void dns_clean();
 
-void dns_cache_table_query(struct aio_t *aio, const char *host);
-void dns_cache_table_unquery(struct aio_t *aio);
+void dns_cache_table_query(struct action_t *action, const char *host);
+void dns_cache_table_unquery(struct action_t *action);
 
 #endif

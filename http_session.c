@@ -1,6 +1,8 @@
+#include "os.h"
 #include "mem.h"
-#include "net.h"
-#include "aio.h"
+#include "log.h"
+#include "aio_thread.h"
+#include "net_thread.h"
 #include "dns.h"
 #include "log.h"
 #include "http_header.h"
@@ -100,7 +102,7 @@ struct http_session_t {
     int64_t body_end;
     struct string_t response;
     size_t response_send;
-    struct aio_t aio;
+    struct action_t action;
     struct http_server_t *http_server;
 };
 
@@ -120,7 +122,7 @@ static void http_client_keepalive(struct http_session_t *http_session);
 static void http_client_close(struct http_session_t *http_session, int err);
 
 static void http_server_create(struct http_session_t *http_session, int type);
-static void http_server_dns_callback(struct aio_t *aio);
+static void http_server_dns_callback(struct action_t *action);
 static void http_server_connect(struct http_session_t *http_session, union conn_addr_t *conn_addr);
 static void http_server_connect_check(struct conn_t *conn);
 static void http_server_connect_done(struct http_session_t *http_session, int err);
@@ -185,8 +187,8 @@ static void http_session_create(struct conn_t *conn, int type)
 
     http_session = mem_malloc(sizeof(struct http_session_t));
     memset(http_session, 0, sizeof(struct http_session_t));
-    http_session->aio.net_thread = conn->net_thread;
-    http_session->aio.data = http_session;
+    http_session->action.net_thread = conn->net_thread;
+    http_session->action.data = http_session;
     http_session->conn = conn;
     string_init(&http_session->url, URL_LEN);
     http_header_init(&http_session->header);
@@ -649,18 +651,18 @@ static void http_server_create(struct http_session_t *http_session, int type)
     if (conn_addr_pton(&peer_addr, host, http_server->url_parser.port) > 0) {
         http_server_connect(http_session, &peer_addr);
     } else {
-        assert(!aio_busy(&http_session->aio));
-        http_session->aio.exec = http_server_dns_callback;
-        dns_cache_table_query(&http_session->aio, host);
+        assert(http_session->action.handle == NULL && http_session->action.callback == NULL);
+        http_session->action.callback = http_server_dns_callback;
+        dns_cache_table_query(&http_session->action, host);
     }
 }
 
-static void http_server_dns_callback(struct aio_t *aio)
+static void http_server_dns_callback(struct action_t *action)
 {
-    struct http_session_t *http_session = aio->data;
+    struct http_session_t *http_session = action->data;
     struct http_server_t *http_server = http_session->http_server;
     union conn_addr_t peer_addr;
-    struct dns_cache_t *dns_cache = aio->extra;
+    struct dns_cache_t *dns_cache = action->extra;
     struct dns_addr_t *dns_addr;
 
     LOG(LOG_DEBUG, "url=%s query done\n", string_buf(&http_session->url));
@@ -679,7 +681,7 @@ static void http_server_dns_callback(struct aio_t *aio)
                 peer_addr.in6.sin6_addr = dns_addr->in6_addr;
                 peer_addr.in6.sin6_scope_id = 0;
             }
-            dns_cache_table_unquery(&http_session->aio);
+            dns_cache_table_unquery(&http_session->action);
         }
     }
     if (!http_server) {
@@ -702,7 +704,7 @@ static void http_server_connect(struct http_session_t *http_session, union conn_
     int sock;
     char str[64];
 
-    http_server->conn = conn = conn_keepalive_get(http_session->aio.net_thread, conn_addr);
+    http_server->conn = conn = conn_keepalive_get(http_session->action.net_thread, conn_addr);
     if (conn) {
         LOG(LOG_INFO, "url=%s sock=%d %s reuse\n", string_buf(&http_session->url), conn->sock, conn_addr_ntop(&conn->peer_addr, str, sizeof(str)));
         http_server_connect_done(http_session, ERR_OK);
@@ -717,7 +719,7 @@ static void http_server_connect(struct http_session_t *http_session, union conn_
     http_server->conn = conn = conn_alloc();
     conn->sock = sock;
     conn->peer_addr = *conn_addr;
-    conn->net_thread = http_session->aio.net_thread;
+    conn->net_thread = http_session->action.net_thread;
     conn_nonblock(conn);
     conn->handle_read = http_server_header_read;
     conn->handle_write = http_server_connect_check;
@@ -1292,7 +1294,7 @@ static void http_session_close(struct http_session_t *http_session)
     struct page_t *page = NULL;
 
     assert(http_session->conn == NULL && http_session->http_server == NULL);
-    if (aio_busy(&http_session->aio)) {
+    if (http_session->action.handle || http_session->action.callback) {
         LOG(LOG_DEBUG, "url=%s busy\n", string_buf(&http_session->url));
         return;
     }
@@ -1328,3 +1330,7 @@ struct http_cache_t {
     struct http_cache_info_t *info;
 };
 
+struct http_cache_client_t {
+    struct http_cache_t *cache;
+    int ret;
+};

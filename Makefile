@@ -8,7 +8,7 @@ CFLAGS += -mcx16 -DHAS_128BIT_CAS=0
 LDFLAGS += -lpthread
 #LDFLAGS += -static
 
-OBJECTS = rbtree.c log.c md5.c atomic_stack.c mem.c hash.c net.c aio.c dns.c http_parser.c http_header.c http_session.c main.c
+OBJECTS = main.c log.c atomic_stack.c rbtree.c mem.c aio_thread.c net_thread.c dns.c http_header.c http_parser.c http_session.c
 
 HFILES =
 

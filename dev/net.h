@@ -1,5 +1,5 @@
-#ifndef NET_MODULE_H
-#define NET_MODULE_H
+#ifndef NET_H
+#define NET_H
 
 #include <stdint.h>
 #include <inttypes.h>
@@ -20,12 +20,12 @@
 #define CONN_EVENT_ABORT (1 << 3)
 
 struct conn_t;
-struct net_module_t {
+struct net_event_t {
 
-    int (*init)(struct net_module_t *net_module);
-    int (*mod)(struct net_module_t *net_module, struct conn_t *conn, int events);
-    int (*wait)(struct net_module_t *net_module, int timeout);
-    int (*uninit)(struct net_module_t *net_module);
+    int (*init)(struct net_event_t *net_event);
+    int (*mod)(struct net_event_t *net_event, struct conn_t *conn, int events);
+    int (*wait)(struct net_event_t *net_event, int timeout);
+    int (*uninit)(struct net_event_t *net_event);
 
     struct conn_t      *conns[2];
     int notified;
@@ -42,7 +42,7 @@ struct net_module_t {
 };
 
 struct conn_t {
-    struct net_module_t *net_module;
+    struct net_event_t *net_event;
     int sock;
     union {
         struct sockaddr addr;
@@ -62,9 +62,9 @@ struct conn_t {
     void *arg;
 };
 
-int net_module_init(struct net_module_t *net_module);
-void net_module_loop(struct net_module_t *net_module);
-void net_module_uninit(struct net_module_t *net_module);
+int net_event_init(struct net_event_t *net_event);
+void net_event_loop(struct net_event_t *net_event);
+void net_event_uninit(struct net_event_t *net_event);
 
 struct conn_t *conn_socket(int domain, int type, int protocol);
 void conn_close(struct conn_t *conn);

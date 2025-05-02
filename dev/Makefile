@@ -6,7 +6,7 @@ LDFLAGS += -lpthread
 #LDFLAGS += -static
 
 
-OBJECTS = main.c rbtree.c mem.c log.c task_thread.c net_module.c epoll_module.c
+OBJECTS = main.c rbtree.c mem.c log.c task_thread.c net.c net_epoll.c
 
 HFILES =
 

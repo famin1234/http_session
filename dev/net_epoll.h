@@ -3,9 +3,10 @@
 
 #include "net.h"
 
-int epoll_module_init(struct net_event_t *net_event);
-int epoll_module_mod(struct net_event_t *net_event, struct conn_t *conn, int events);
-int epoll_module_wait(struct net_event_t *net_event, int timeout);
-int epoll_module_uninit(struct net_event_t *net_event);
+int net_loop_poll_init(struct net_loop_t *net_loop);
+int net_loop_poll_add(struct net_loop_t *net_loop, struct conn_t *conn, int events);
+int net_loop_poll_del(struct net_loop_t *net_loop, struct conn_t *conn, int events);
+int net_loop_poll_wait(struct net_loop_t *net_loop, int timeout);
+int net_loop_poll_uninit(struct net_loop_t *net_loop);
 
 #endif

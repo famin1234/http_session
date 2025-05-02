@@ -20,13 +20,8 @@
 #define CONN_EVENT_ABORT (1 << 3)
 
 struct conn_t;
-struct net_event_t {
 
-    int (*init)(struct net_event_t *net_event);
-    int (*mod)(struct net_event_t *net_event, struct conn_t *conn, int events);
-    int (*wait)(struct net_event_t *net_event, int timeout);
-    int (*uninit)(struct net_event_t *net_event);
-
+struct net_loop_t {
     struct conn_t      *conns[2];
     int notified;
     pthread_mutex_t    mutex;
@@ -37,12 +32,11 @@ struct net_event_t {
     int64_t time;
     int stop;
 
-
-    void *sub_module;
+    void *arg;
 };
 
 struct conn_t {
-    struct net_event_t *net_event;
+    struct net_loop_t *net_loop;
     int sock;
     union {
         struct sockaddr addr;
@@ -62,9 +56,9 @@ struct conn_t {
     void *arg;
 };
 
-int net_event_init(struct net_event_t *net_event);
-void net_event_loop(struct net_event_t *net_event);
-void net_event_uninit(struct net_event_t *net_event);
+int net_loop_init(struct net_loop_t *net_loop);
+void net_loop_loop(struct net_loop_t *net_loop);
+void net_loop_uninit(struct net_loop_t *net_loop);
 
 struct conn_t *conn_socket(int domain, int type, int protocol);
 void conn_close(struct conn_t *conn);
@@ -74,7 +68,8 @@ int conn_timer_add(struct conn_t *conn, int64_t timer_expire);
 int conn_timer_mod(struct conn_t *conn, int64_t timer_expire);
 int conn_timer_del(struct conn_t *conn);
 
-int conn_events_mod(struct conn_t *conn, int events);
+int conn_events_add(struct conn_t *conn, int events);
+int conn_events_del(struct conn_t *conn, int events);
 void conn_read_ready(struct conn_t *conn, int ready);
 void conn_write_ready(struct conn_t *conn, int ready);
 

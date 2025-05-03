@@ -113,7 +113,9 @@ int conn_events_add(struct conn_t *conn, int events)
                 list_add_tail(&conn->active_node, &conn->net_loop->active_list);
                 conn->flags.active = 1;
             }
+            events &= (~CONN_EVENT_READ);
         }
+        conn->flags.read_enable = 1;
     }
     if (events & CONN_EVENT_WRITE) {
         if (conn->flags.write_ready) {
@@ -121,14 +123,28 @@ int conn_events_add(struct conn_t *conn, int events)
                 list_add_tail(&conn->active_node, &conn->net_loop->active_list);
                 conn->flags.active = 1;
             }
+            events &= (~CONN_EVENT_WRITE);
         }
+        conn->flags.write_enable = 1;
     }
-    return net_loop_poll_add(conn->net_loop, conn, events);
+    return net_loop_poll_set(conn->net_loop, conn, conn->events | events);
 }
 
 int conn_events_del(struct conn_t *conn, int events)
 {
-    return 0;
+    if (events & CONN_EVENT_READ) {
+        conn->flags.read_enable = 0;
+    }
+    if (events & CONN_EVENT_WRITE) {
+        conn->flags.write_enable = 0;
+    }
+    if (conn->flags.read_enable == 0 && conn->flags.write_enable == 0) {
+        if (conn->flags.active) {
+            list_del(&conn->active_node);
+            conn->flags.active = 0;
+        }
+    }
+    return net_loop_poll_set(conn->net_loop, conn, conn->events & (~events));
 }
 
 void conn_read_ready(struct conn_t *conn, int ready)

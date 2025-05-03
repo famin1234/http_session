@@ -51,6 +51,8 @@ struct conn_t {
         int active:1;
         int read_ready:1;
         int write_ready:1;
+        int read_enable:1;
+        int write_enable:1;
     } flags;
     void (*handle)(struct conn_t *conn, int events);
     void *arg;

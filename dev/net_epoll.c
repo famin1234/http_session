@@ -28,51 +28,45 @@ int net_loop_epoll_init(struct net_loop_t *net_loop)
     return 0;
 }
 
-int net_loop_epoll_add(struct net_loop_t *net_loop, struct conn_t *conn, int events)
+int net_loop_epoll_set(struct net_loop_t *net_loop, struct conn_t *conn, int events)
 {
     struct net_epoll_t *net_epoll;
     struct epoll_event ev;
 
-    if (conn->events == events) {
-        return 0;
-    }
-    ev.data.ptr = conn;
-    ev.events = EPOLLET;
-    if (events & CONN_EVENT_READ) {
-        ev.events |= EPOLLIN;
-    }
-    if (events & CONN_EVENT_WRITE) {
-        ev.events |= EPOLLOUT;
-    }
-    net_epoll = (struct net_epoll_t *)net_loop->arg;
-    if (conn->events == 0) {
-        if (epoll_ctl(net_epoll->fd, EPOLL_CTL_ADD, conn->sock, &ev)) {
-            LOG(LOG_ERROR, "fd=%d conn=%d add error: %s\n", net_epoll->fd, conn->sock, strerror(errno));
-            assert(0);
-            return -1;
+    if (conn->events != events) {
+        ev.data.ptr = conn;
+        ev.events = EPOLLET;
+        if (events & CONN_EVENT_READ) {
+            ev.events |= EPOLLIN;
         }
-        net_epoll->event_add++;
-    } else if (events > 0) {
-        if (epoll_ctl(net_epoll->fd, EPOLL_CTL_MOD, conn->sock, &ev)) {
-            LOG(LOG_ERROR, "fd=%d conn=%d mod error: %s\n", net_epoll->fd, conn->sock, strerror(errno));
-            assert(0);
-            return -1;
+        if (events & CONN_EVENT_WRITE) {
+            ev.events |= EPOLLOUT;
         }
-        net_epoll->event_mod++;
-    } else {
-        if (epoll_ctl(net_epoll->fd, EPOLL_CTL_DEL, conn->sock, &ev)) {
-            LOG(LOG_ERROR, "fd=%d conn=%d del error: %s\n", net_epoll->fd, conn->sock, strerror(errno));
-            assert(0);
-            return -1;
+        net_epoll = (struct net_epoll_t *)net_loop->arg;
+        if (conn->events == 0) {
+            if (epoll_ctl(net_epoll->fd, EPOLL_CTL_ADD, conn->sock, &ev)) {
+                LOG(LOG_ERROR, "fd=%d conn=%d add error: %s\n", net_epoll->fd, conn->sock, strerror(errno));
+                assert(0);
+                return -1;
+            }
+            net_epoll->event_add++;
+        } else if (events > 0) {
+            if (epoll_ctl(net_epoll->fd, EPOLL_CTL_MOD, conn->sock, &ev)) {
+                LOG(LOG_ERROR, "fd=%d conn=%d mod error: %s\n", net_epoll->fd, conn->sock, strerror(errno));
+                assert(0);
+                return -1;
+            }
+            net_epoll->event_mod++;
+        } else {
+            if (epoll_ctl(net_epoll->fd, EPOLL_CTL_DEL, conn->sock, &ev)) {
+                LOG(LOG_ERROR, "fd=%d conn=%d del error: %s\n", net_epoll->fd, conn->sock, strerror(errno));
+                assert(0);
+                return -1;
+            }
+            net_epoll->event_del++;
         }
-        net_epoll->event_del++;
+        conn->events = events;
     }
-    conn->events = events;
-    return 0;
-}
-
-int net_loop_epoll_del(struct net_loop_t *net_loop, struct conn_t *conn, int events)
-{
     return 0;
 }
 

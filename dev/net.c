@@ -277,10 +277,18 @@ void net_loop_loop(struct net_loop_t *net_loop)
                 }
             }
         }
-        if (net_loop->stop) {
+        if (net_loop->exit) {
             break;
         }
     }
+}
+
+int net_loop_post_exit(struct net_loop_t *net_loop)
+{
+    pthread_mutex_lock(&net_loop->mutex);
+    net_loop->exit = 1;
+    pthread_mutex_unlock(&net_loop->mutex);
+    return 0;
 }
 
 void net_loop_uninit(struct net_loop_t *net_loop)

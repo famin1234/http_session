@@ -1,5 +1,4 @@
 #include <assert.h>
-#include "list.h"
 #include "mem.h"
 #include "log.h"
 #include "task_thread.h"

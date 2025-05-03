@@ -30,7 +30,7 @@ struct net_loop_t {
     int64_t timer_expire;
     struct list_head_t active_list;
     int64_t time;
-    int stop;
+    int exit;
 
     void *arg;
 };
@@ -60,6 +60,7 @@ struct conn_t {
 
 int net_loop_init(struct net_loop_t *net_loop);
 void net_loop_loop(struct net_loop_t *net_loop);
+int net_loop_post_exit(struct net_loop_t *net_loop);
 void net_loop_uninit(struct net_loop_t *net_loop);
 
 struct conn_t *conn_socket(int domain, int type, int protocol);

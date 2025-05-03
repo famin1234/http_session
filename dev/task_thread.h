@@ -1,16 +1,11 @@
-#ifndef TASK_THREAD_H
-#define TASK_THREAD_H
+#ifndef THREAD_H
+#define THREAD_H
 
 #include <pthread.h>
-#include "list.h"
+#include "task.h"
+#include "net.h"
 
 extern int pthread_setname_np (pthread_t __target_thread, const char *__name);
-
-struct task_t {
-    struct list_head_t node;
-    void (*handle)(struct task_t *);
-    void *arg;
-};
 
 struct task_thread_t {
     pthread_t tid;

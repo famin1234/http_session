@@ -7,8 +7,94 @@
 #include "net_epoll.h"
 #include "net.h"
 
+#define LISTEN_MAX 1024
 #define TIMER_PERIOD 100
 #define ABS(x) (x >= 0 ? x : x)
+
+int conn_addr_pton(struct conn_addr_t *conn_addr, const char *host, unsigned short port)
+{
+    if (inet_pton(AF_INET, host, &conn_addr->in.sin_addr) > 0) {
+        conn_addr->in.sin_family = AF_INET;
+        conn_addr->in.sin_port = htons(port);
+        return 1;
+    } else if (inet_pton(AF_INET6, host, &conn_addr->in6.sin6_addr) > 0) {
+        conn_addr->in6.sin6_family = AF_INET6;
+        conn_addr->in6.sin6_port = htons(port);
+        conn_addr->in6.sin6_flowinfo = 0;
+        conn_addr->in6.sin6_scope_id = 0;
+        return 1;
+    }
+    return -1;
+}
+
+const char *conn_addr_ntop(const struct conn_addr_t *conn_addr, char *dst, size_t size)
+{
+    size_t len;
+    if (conn_addr->addr.sa_family == AF_INET) {
+        inet_ntop(AF_INET, &conn_addr->in.sin_addr, dst, size);
+        len = strlen(dst);
+        snprintf(dst + len, size - len, ":%d", ntohs(conn_addr->in.sin_port));
+    } else if (conn_addr->addr.sa_family == AF_INET6) {
+        inet_ntop(AF_INET6, &conn_addr->in6.sin6_addr, dst, size);
+        len = strlen(dst);
+        snprintf(dst + len, size - len, ":%d", ntohs(conn_addr->in6.sin6_port));
+    } else {
+        return NULL;
+    }
+    return dst;
+}
+
+int conn_listen(struct conn_t **out, const struct conn_addr_t *conn_addr)
+{
+    int on = 1;
+    int sock;
+    char str[65];
+    struct conn_t *conn;
+
+    sock = socket(conn_addr->addr.sa_family, SOCK_STREAM, IPPROTO_TCP);
+    if (sock < 0) {
+        LOG(LOG_ERROR, "sock=%d %s error:%s\n", sock, conn_addr_ntop(conn_addr, str, sizeof(str)), strerror(errno));
+        return -1;
+    }
+    if (conn_addr->addr.sa_family == AF_INET6) {
+        if (setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof(on))) {
+            LOG(LOG_ERROR, "sock=%d %s error:%s\n", sock, conn_addr_ntop(conn_addr, str, sizeof(str)), strerror(errno));
+            close(sock);
+            return -1;
+        }
+    }
+    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on))) {
+        LOG(LOG_ERROR, "sock=%d %s error:%s\n", sock, conn_addr_ntop(conn_addr, str, sizeof(str)), strerror(errno));
+        close(sock);
+        return -1;
+    }
+    if (setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on))) {
+        LOG(LOG_ERROR, "sock=%d %s error:%s\n", sock, conn_addr_ntop(conn_addr, str, sizeof(str)), strerror(errno));
+        close(sock);
+        return -1;
+    }
+    if (bind(sock, &conn_addr->addr, sizeof(struct conn_addr_t)) != 0) {
+        LOG(LOG_ERROR, "sock=%d %s error:%s\n", sock, conn_addr_ntop(conn_addr, str, sizeof(str)), strerror(errno));
+        close(sock);
+        return -1;
+    }
+    if (listen(sock, LISTEN_MAX)) {
+        LOG(LOG_ERROR, "sock=%d %s error:%s\n", sock, conn_addr_ntop(conn_addr, str, sizeof(str)), strerror(errno));
+        close(sock);
+        return -1;
+    }
+    LOG(LOG_INFO, "sock=%d %s listen ok\n", sock, conn_addr_ntop(conn_addr, str, sizeof(str)));
+    *out = conn = (struct conn_t *)mem_malloc(sizeof(struct conn_t));
+    memset(conn, 0, sizeof(struct conn_t));
+    conn->sock = sock;
+    conn->peer_addr = *conn_addr;
+    return 0;
+}
+
+struct conn_t *conn_accept(struct conn_t *conn)
+{
+    return NULL;
+}
 
 struct conn_t *conn_socket(int domain, int type, int protocol)
 {
@@ -168,6 +254,7 @@ static void net_loop_pipe_read(struct conn_t *conn, int events)
         conn_events_add(conn, CONN_EVENT_READ);
     } else if(n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
         LOG(LOG_DEBUG, "sock=%d read=%zd EAGAIN\n", conn->sock, n);
+        conn->flags.read_ready = 0;
         conn_events_add(conn, CONN_EVENT_READ);
     } else {
         LOG(LOG_ERROR, "sock=%d read=%zd error: %s\n", conn->sock, n, strerror(errno));
@@ -241,7 +328,7 @@ void net_loop_loop(struct net_loop_t *net_loop)
     INIT_LIST_HEAD(&task_list);
     while (1) {
         loop = 0;
-        net_loop_poll_wait(net_loop, list_empty(&net_loop->active_list) ? 0 : 100);
+        net_loop_poll_wait(net_loop, list_empty(&net_loop->active_list) ? 100 : 0);
         gettimeofday(&tv, NULL);
         net_loop->time = tv.tv_sec * 1000  + tv.tv_usec / 1000;
         while (!list_empty(&net_loop->active_list) && loop++ < 100) {
@@ -259,7 +346,7 @@ void net_loop_loop(struct net_loop_t *net_loop)
         }
         pthread_mutex_lock(&net_loop->mutex);
         list_splice_init(&net_loop->task_list, &task_list);
-        net_loop->notified = 1;
+        net_loop->notified = 0;
         pthread_mutex_unlock(&net_loop->mutex);
         while (!list_empty(&task_list)) {
             task = d_list_head(&task_list, struct task_t, node);
@@ -283,7 +370,27 @@ void net_loop_loop(struct net_loop_t *net_loop)
     }
 }
 
-int net_loop_post_exit(struct net_loop_t *net_loop)
+int net_loop_post(struct net_loop_t *net_loop, struct task_t *task)
+{
+    int notify;
+
+    pthread_mutex_lock(&net_loop->mutex);
+    list_add_tail(&task->node, &net_loop->task_list);
+    if (net_loop->notified) {
+        notify = 0;
+    } else {
+        notify = 1;
+        net_loop->notified = 1;
+    }
+    pthread_mutex_unlock(&net_loop->mutex);
+    if (notify) {
+        net_loop_pipe_write(net_loop->conns[1], CONN_EVENT_WRITE);
+    }
+    LOG(LOG_DEBUG, "notify=%d\n", notify);
+    return 0;
+}
+
+int net_loop_exit(struct net_loop_t *net_loop)
 {
     pthread_mutex_lock(&net_loop->mutex);
     net_loop->exit = 1;

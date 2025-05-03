@@ -3,6 +3,7 @@
 #include "log.h"
 #include "task_thread.h"
 #include "net_thread.h"
+#include "http_session.h"
 
 static volatile int stop = 0;
 
@@ -24,6 +25,7 @@ int main(int argc, char *argv[])
     log_set_thread_name("main_0");
     net_threads_create(1);
     task_threads_create(1);
+    http_session_init();
     while (!stop) {
         usleep(10 * 1000);
 

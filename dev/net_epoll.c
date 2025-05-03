@@ -23,7 +23,7 @@ int net_loop_epoll_init(struct net_loop_t *net_loop)
         mem_free(net_epoll);
         return -1;
     }
-    LOG(LOG_INFO, "epoll create fd=%d\n", net_epoll);
+    LOG(LOG_INFO, "epoll create fd=%d\n", net_epoll->fd);
     net_loop->arg = (void *)net_epoll;
     return 0;
 }

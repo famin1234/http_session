@@ -43,7 +43,7 @@ int net_threads_exit()
     int i;
 
     for (i = 0; i < net_threads_num; i++) {
-        net_loop_post_exit(&net_threads[i].net_loop);
+        net_loop_exit(&net_threads[i].net_loop);
         pthread_join(net_threads[i].tid, NULL);
         net_loop_uninit(&net_threads[i].net_loop);
     }

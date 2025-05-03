@@ -27,8 +27,7 @@ int main(int argc, char *argv[])
     task_threads_create(1);
     http_session_init();
     while (!stop) {
-        usleep(10 * 1000);
-
+        usleep(100 * 1000);
     }
     net_threads_exit();
     task_threads_exit();

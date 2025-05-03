@@ -5,7 +5,10 @@
 #include <errno.h>
 #include <string.h>
 
-#define LOG(level, ...) do {if (level <= LOG_DEBUG) log_print(level, __FILE__, __LINE__, __FUNCTION__, __VA_ARGS__);} while(0)
+#define LOG(level, ...) do {\
+    if (level <= LOG_DEBUG)\
+    log_print(level, __FILE__, __LINE__, __FUNCTION__, __VA_ARGS__);\
+} while(0)
 
 enum {
     LOG_NONE,

@@ -53,9 +53,9 @@ struct conn_addr_t {
 };
 
 struct conn_t {
-    struct net_loop_t *net_loop;
     int sock;
     struct conn_addr_t peer_addr;
+    struct net_loop_t *net_loop;
     int64_t timer_expire;
     struct rb_node     timer_node;
     struct list_head_t     active_node;
@@ -67,7 +67,6 @@ struct conn_t {
         int read_enable:1;
         int write_enable:1;
     } flags;
-    int err;
     void (*handle)(struct conn_t *conn, int events);
     void *arg;
 };
@@ -81,13 +80,13 @@ void net_loop_uninit(struct net_loop_t *net_loop);
 int conn_addr_pton(struct conn_addr_t *conn_addr, const char *host, unsigned short port);
 const char *conn_addr_ntop(const struct conn_addr_t *conn_addr, char *dst, size_t size);
 
-int conn_listen(struct conn_t **out, const struct conn_addr_t *conn_addr);
+int socket_listen(const struct conn_addr_t *conn_addr);
 struct conn_t *conn_socket(int domain, int type, int protocol);
 void conn_close(struct conn_t *conn);
 int conn_nonblock(struct conn_t *conn);
 
-int conn_timer_add(struct conn_t *conn, int64_t timer_expire);
-int conn_timer_mod(struct conn_t *conn, int64_t timer_expire);
+int conn_timer_add(struct conn_t *conn, int timeout);
+int conn_timer_mod(struct conn_t *conn, int timeout);
 int conn_timer_del(struct conn_t *conn);
 
 int conn_events_add(struct conn_t *conn, int events);

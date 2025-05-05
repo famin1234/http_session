@@ -13,18 +13,23 @@
 
 int conn_addr_pton(struct conn_addr_t *conn_addr, const char *host, unsigned short port)
 {
-    if (inet_pton(AF_INET, host, &conn_addr->in.sin_addr) > 0) {
+    int ret;
+
+    ret = inet_pton(AF_INET, host, &conn_addr->in.sin_addr);
+    if (ret > 0) {
         conn_addr->in.sin_family = AF_INET;
         conn_addr->in.sin_port = htons(port);
-        return 1;
-    } else if (inet_pton(AF_INET6, host, &conn_addr->in6.sin6_addr) > 0) {
+        return ret;
+    }
+    ret = inet_pton(AF_INET6, host, &conn_addr->in6.sin6_addr);
+    if (ret > 0) {
         conn_addr->in6.sin6_family = AF_INET6;
         conn_addr->in6.sin6_port = htons(port);
         conn_addr->in6.sin6_flowinfo = 0;
         conn_addr->in6.sin6_scope_id = 0;
-        return 1;
+        return ret;
     }
-    return -1;
+    return ret;
 }
 
 const char *conn_addr_ntop(const struct conn_addr_t *conn_addr, char *dst, size_t size)
@@ -44,12 +49,11 @@ const char *conn_addr_ntop(const struct conn_addr_t *conn_addr, char *dst, size_
     return dst;
 }
 
-int conn_listen(struct conn_t **out, const struct conn_addr_t *conn_addr)
+int socket_listen(const struct conn_addr_t *conn_addr)
 {
     int on = 1;
     int sock;
-    char str[65];
-    struct conn_t *conn;
+    char str[64];
 
     sock = socket(conn_addr->addr.sa_family, SOCK_STREAM, IPPROTO_TCP);
     if (sock < 0) {
@@ -84,16 +88,7 @@ int conn_listen(struct conn_t **out, const struct conn_addr_t *conn_addr)
         return -1;
     }
     LOG(LOG_INFO, "sock=%d %s listen ok\n", sock, conn_addr_ntop(conn_addr, str, sizeof(str)));
-    *out = conn = (struct conn_t *)mem_malloc(sizeof(struct conn_t));
-    memset(conn, 0, sizeof(struct conn_t));
-    conn->sock = sock;
-    conn->peer_addr = *conn_addr;
-    return 0;
-}
-
-struct conn_t *conn_accept(struct conn_t *conn)
-{
-    return NULL;
+    return sock;
 }
 
 struct conn_t *conn_socket(int domain, int type, int protocol)
@@ -150,14 +145,14 @@ static int conn_timer_compare(struct conn_t *conn1, struct conn_t *conn2)
     return 0;
 }
 
-int conn_timer_add(struct conn_t *conn, int64_t timer_expire)
+int conn_timer_add(struct conn_t *conn, int timeout)
 {
     struct rb_node **p = &conn->net_loop->timer_root.rb_node;
     struct rb_node *parent = NULL;
     struct conn_t *tmp;
     int cmp;
 
-    conn->timer_expire = timer_expire;
+    conn->timer_expire = conn->net_loop->time + timeout;
     while (*p)
     {
         parent = *p;
@@ -175,12 +170,13 @@ int conn_timer_add(struct conn_t *conn, int64_t timer_expire)
     return 0;
 }
 
-int conn_timer_update(struct conn_t *conn, int64_t timer_expire)
+int conn_timer_update(struct conn_t *conn, int timeout)
 {
-    int64_t diff = timer_expire - conn->timer_expire;
+    int64_t diff = conn->net_loop->time + timeout - conn->timer_expire;
+
     if (ABS(diff) >= TIMER_PERIOD) {
         conn_timer_del(conn);
-        conn_timer_add(conn, timer_expire);
+        conn_timer_add(conn, timeout);
     }
     return 0;
 }

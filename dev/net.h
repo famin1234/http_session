@@ -67,7 +67,9 @@ struct conn_t {
         int read_enable:1;
         int write_enable:1;
     } flags;
-    void (*handle)(struct conn_t *conn, int events);
+    int (*handle_read)(struct conn_t *conn);
+    int (*handle_write)(struct conn_t *conn);
+    int (*handle_timeout)(struct conn_t *conn);
     void *arg;
 };
 

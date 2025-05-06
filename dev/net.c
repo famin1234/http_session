@@ -239,7 +239,7 @@ void conn_write_ready(struct conn_t *conn, int ready)
     conn->flags.write_ready = ready;
 }
 
-static void net_loop_pipe_read(struct conn_t *conn, int events)
+static int net_loop_pipe_read(struct conn_t *conn)
 {
     char buf[4096];
     ssize_t n;
@@ -255,9 +255,10 @@ static void net_loop_pipe_read(struct conn_t *conn, int events)
     } else {
         LOG(LOG_ERROR, "sock=%d read=%zd error: %s\n", conn->sock, n, strerror(errno));
     }
+    return 0;
 }
 
-static void net_loop_pipe_write(struct conn_t *conn, int events)
+static int net_loop_pipe_write(struct conn_t *conn)
 {
     ssize_t n;
 
@@ -269,6 +270,7 @@ static void net_loop_pipe_write(struct conn_t *conn, int events)
     } else {
         LOG(LOG_ERROR, "sock=%d write=%zd error: %s\n", conn->sock, n, strerror(errno));
     }
+    return 0;
 }
 
 int net_loop_init(struct net_loop_t *net_loop)
@@ -296,14 +298,14 @@ int net_loop_init(struct net_loop_t *net_loop)
     conn->net_loop = net_loop;
     conn->sock = fds[0];
     conn_nonblock(conn);
-    conn->handle = net_loop_pipe_read;
+    conn->handle_read = net_loop_pipe_read;
 
     net_loop->conns[1] = conn = mem_malloc(sizeof(struct conn_t));
     memset(conn, 0, sizeof(struct conn_t));
     conn->net_loop = net_loop;
     conn->sock = fds[1];
     conn_nonblock(conn);
-    conn->handle = net_loop_pipe_write;
+    conn->handle_write = net_loop_pipe_write;
 
     LOG(LOG_DEBUG, "sock=%d open\n", net_loop->conns[0]->sock);
     LOG(LOG_DEBUG, "sock=%d open\n", net_loop->conns[1]->sock);
@@ -318,7 +320,6 @@ void net_loop_loop(struct net_loop_t *net_loop)
     struct task_t *task;
     struct list_head_t task_list;
     struct timeval tv;
-    int events;
     int loop;
 
     INIT_LIST_HEAD(&task_list);
@@ -331,14 +332,16 @@ void net_loop_loop(struct net_loop_t *net_loop)
             conn = d_list_head(&net_loop->active_list, struct conn_t, active_node);
             list_del(&conn->active_node);
             conn->flags.active = 0;
-            events = CONN_EVENT_NONE;
             if (conn->flags.read_ready) {
-                events |= CONN_EVENT_READ;
+                if (conn->handle_read(conn)) {
+                    continue;
+                }
             }
             if (conn->flags.write_ready) {
-                events |= CONN_EVENT_WRITE;
+                if (conn->handle_write(conn)) {
+                    continue;
+                }
             }
-            conn->handle(conn, events);
         }
         pthread_mutex_lock(&net_loop->mutex);
         list_splice_init(&net_loop->task_list, &task_list);
@@ -354,7 +357,7 @@ void net_loop_loop(struct net_loop_t *net_loop)
                 conn = rb_entry(rb_node, struct conn_t, timer_node);
                 if (net_loop->time >= conn->timer_expire) {
                     conn_timer_del(conn);
-                    conn->handle(conn, CONN_EVENT_TIMEOUT);
+                    conn->handle_timeout(conn);
                 } else {
                     break;
                 }
@@ -380,7 +383,7 @@ int net_loop_post(struct net_loop_t *net_loop, struct task_t *task)
     }
     pthread_mutex_unlock(&net_loop->mutex);
     if (notify) {
-        net_loop_pipe_write(net_loop->conns[1], CONN_EVENT_WRITE);
+        net_loop_pipe_write(net_loop->conns[1]);
     }
     LOG(LOG_DEBUG, "notify=%d\n", notify);
     return 0;

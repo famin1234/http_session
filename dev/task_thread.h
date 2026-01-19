@@ -2,10 +2,7 @@
 #define THREAD_H
 
 #include <pthread.h>
-#include "task.h"
-#include "net.h"
 
-extern int pthread_setname_np (pthread_t __target_thread, const char *__name);
 
 struct task_thread_t {
     pthread_t tid;

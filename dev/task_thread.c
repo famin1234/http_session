@@ -27,7 +27,7 @@ static void *task_thread_loop(void *arg)
                 break;
             } else {
                 task_threads_wait++;
-                pthread_cond_wait(&cond, &mutex);
+                pthread_cond_wait(&task_threads_cond, &task_threads_mutex);
                 task_threads_wait--;
                 if (list_empty(&list)) {
                     pthread_mutex_unlock(&mutex);

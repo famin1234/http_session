@@ -1,9 +1,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include "log.h"
-#include "task_thread.h"
-#include "net_thread.h"
-#include "http_session.h"
+#include "thread.h"
 
 static volatile int stop = 0;
 
@@ -22,14 +20,10 @@ int main(int argc, char *argv[])
         LOG(LOG_ERROR, "regist SIGPIPE error\n");
         return -1;
     }
-    log_set_thread_name("main_0");
-    net_threads_create(1);
-    task_threads_create(1);
-    http_session_init();
+    threads_init(1, 2);
     while (!stop) {
         usleep(100 * 1000);
     }
-    net_threads_exit();
-    task_threads_exit();
+    threads_uninit();
     return 0;
 }

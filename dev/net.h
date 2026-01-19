@@ -11,7 +11,7 @@
 
 #include "list.h"
 #include "rbtree.h"
-#include "task_thread.h"
+#include "thread.h"
 
 #define CONN_EVENT_NONE 0
 #define CONN_EVENT_READ (1 << 0)
@@ -30,35 +30,40 @@ enum {
 
 struct conn_t;
 
-struct net_loop_t {
-    struct conn_t      *conns[2];
+struct net_handle_t {
+    struct conn_t *conns[2];
     int notified;
-    pthread_mutex_t    mutex;
+    pthread_mutex_t mutex;
     struct list_head_t task_list;
-    struct rb_root     timer_root;
+    struct rb_root timer_root;
     int64_t timer_expire;
     struct list_head_t active_list;
     int64_t time;
-    int exit;
 
-    void *arg;
+    int epoll_fd;
+    int64_t event_add;
+    int64_t event_mod;
+    int64_t event_del;
+
+    int exit;
+    void *data;
 };
 
 struct conn_addr_t {
     union {
-    struct sockaddr addr;
-    struct sockaddr_in in;
-    struct sockaddr_in6 in6;
+        struct sockaddr addr;
+        struct sockaddr_in in;
+        struct sockaddr_in6 in6;
     };
 };
 
 struct conn_t {
     int sock;
     struct conn_addr_t peer_addr;
-    struct net_loop_t *net_loop;
+    struct net_handle_t *net_handle;
     int64_t timer_expire;
-    struct rb_node     timer_node;
-    struct list_head_t     active_node;
+    struct rb_node timer_node;
+    struct list_head_t active_node;
     int events;
     struct {
         int active:1;
@@ -73,11 +78,11 @@ struct conn_t {
     void *arg;
 };
 
-int net_loop_init(struct net_loop_t *net_loop);
-void net_loop_loop(struct net_loop_t *net_loop);
-int net_loop_post(struct net_loop_t *net_loop, struct task_t *task);
-int net_loop_exit(struct net_loop_t *net_loop);
-void net_loop_uninit(struct net_loop_t *net_loop);
+int net_handle_init(struct net_handle_t *net_handle);
+void net_handle_loop(struct net_handle_t *net_handle);
+int net_handle_post(struct net_handle_t *net_handle, struct task_t *task);
+int net_handle_exit(struct net_handle_t *net_handle);
+void net_handle_uninit(struct net_handle_t *net_handle);
 
 int conn_addr_pton(struct conn_addr_t *conn_addr, const char *host, unsigned short port);
 const char *conn_addr_ntop(const struct conn_addr_t *conn_addr, char *dst, size_t size);

@@ -2,9 +2,10 @@
 #include <fcntl.h>
 #include <assert.h>
 #include <sys/time.h>
+#include <sys/epoll.h>
+
 #include "mem.h"
 #include "log.h"
-#include "net_epoll.h"
 #include "net.h"
 
 #define LISTEN_MAX 1024
@@ -147,12 +148,12 @@ static int conn_timer_compare(struct conn_t *conn1, struct conn_t *conn2)
 
 int conn_timer_add(struct conn_t *conn, int timeout)
 {
-    struct rb_node **p = &conn->net_loop->timer_root.rb_node;
+    struct rb_node **p = &conn->net_handle->timer_root.rb_node;
     struct rb_node *parent = NULL;
     struct conn_t *tmp;
     int cmp;
 
-    conn->timer_expire = conn->net_loop->time + timeout;
+    conn->timer_expire = conn->net_handle->time + timeout;
     while (*p)
     {
         parent = *p;
@@ -166,13 +167,13 @@ int conn_timer_add(struct conn_t *conn, int timeout)
             return -1;
     }
     rb_link_node(&conn->timer_node, parent, p);
-    rb_insert_color(&conn->timer_node, &conn->net_loop->timer_root);
+    rb_insert_color(&conn->timer_node, &conn->net_handle->timer_root);
     return 0;
 }
 
 int conn_timer_update(struct conn_t *conn, int timeout)
 {
-    int64_t diff = conn->net_loop->time + timeout - conn->timer_expire;
+    int64_t diff = conn->net_handle->time + timeout - conn->timer_expire;
 
     if (ABS(diff) >= TIMER_PERIOD) {
         conn_timer_del(conn);
@@ -183,7 +184,7 @@ int conn_timer_update(struct conn_t *conn, int timeout)
 
 int conn_timer_del(struct conn_t *conn)
 {
-    rb_erase(&conn->timer_node, &conn->net_loop->timer_root);
+    rb_erase(&conn->timer_node, &conn->net_handle->timer_root);
     return 0;
 }
 
@@ -192,7 +193,7 @@ int conn_events_add(struct conn_t *conn, int events)
     if (events & CONN_EVENT_READ) {
         if (conn->flags.read_ready) {
             if (!conn->flags.active) {
-                list_add_tail(&conn->active_node, &conn->net_loop->active_list);
+                list_add_tail(&conn->active_node, &conn->net_handle->active_list);
                 conn->flags.active = 1;
             }
             events &= (~CONN_EVENT_READ);
@@ -202,14 +203,14 @@ int conn_events_add(struct conn_t *conn, int events)
     if (events & CONN_EVENT_WRITE) {
         if (conn->flags.write_ready) {
             if (!conn->flags.active) {
-                list_add_tail(&conn->active_node, &conn->net_loop->active_list);
+                list_add_tail(&conn->active_node, &conn->net_handle->active_list);
                 conn->flags.active = 1;
             }
             events &= (~CONN_EVENT_WRITE);
         }
         conn->flags.write_enable = 1;
     }
-    return net_loop_poll_set(conn->net_loop, conn, conn->events | events);
+    return net_handle_poll_set(conn->net_handle, conn, conn->events | events);
 }
 
 int conn_events_del(struct conn_t *conn, int events)
@@ -226,7 +227,7 @@ int conn_events_del(struct conn_t *conn, int events)
             conn->flags.active = 0;
         }
     }
-    return net_loop_poll_set(conn->net_loop, conn, conn->events & (~events));
+    return net_handle_poll_set(conn->net_handle, conn, conn->events & (~events));
 }
 
 void conn_read_ready(struct conn_t *conn, int ready)
@@ -239,7 +240,7 @@ void conn_write_ready(struct conn_t *conn, int ready)
     conn->flags.write_ready = ready;
 }
 
-static int net_loop_pipe_read(struct conn_t *conn)
+static int net_handle_pipe_read(struct conn_t *conn)
 {
     char buf[4096];
     ssize_t n;
@@ -258,7 +259,7 @@ static int net_loop_pipe_read(struct conn_t *conn)
     return 0;
 }
 
-static int net_loop_pipe_write(struct conn_t *conn)
+static int net_handle_pipe_write(struct conn_t *conn)
 {
     ssize_t n;
 
@@ -273,47 +274,47 @@ static int net_loop_pipe_write(struct conn_t *conn)
     return 0;
 }
 
-int net_loop_init(struct net_loop_t *net_loop)
+int net_handle_init(struct net_handle_t *net_handle)
 {
     int fds[2];
     struct conn_t *conn;
 
-    if (net_loop_poll_init(net_loop)) {
+    if (net_handle_poll_init(net_handle)) {
         return -1;
     }
 
     if (pipe(fds)) {
         LOG(LOG_ERROR, "pipe error: %s\n", strerror(errno));
-        net_loop_poll_uninit(net_loop);
+        net_handle_poll_uninit(net_handle);
         return -1;
     }
 
-    pthread_mutex_init(&net_loop->mutex, NULL);
-    INIT_LIST_HEAD(&net_loop->task_list);
-    net_loop->timer_root = RB_ROOT;
-    INIT_LIST_HEAD(&net_loop->active_list);
+    pthread_mutex_init(&net_handle->mutex, NULL);
+    INIT_LIST_HEAD(&net_handle->task_list);
+    net_handle->timer_root = RB_ROOT;
+    INIT_LIST_HEAD(&net_handle->active_list);
 
-    net_loop->conns[0] = conn = mem_malloc(sizeof(struct conn_t));
+    net_handle->conns[0] = conn = mem_malloc(sizeof(struct conn_t));
     memset(conn, 0, sizeof(struct conn_t));
-    conn->net_loop = net_loop;
+    conn->net_handle = net_handle;
     conn->sock = fds[0];
     conn_nonblock(conn);
-    conn->handle_read = net_loop_pipe_read;
+    conn->handle_read = net_handle_pipe_read;
 
-    net_loop->conns[1] = conn = mem_malloc(sizeof(struct conn_t));
+    net_handle->conns[1] = conn = mem_malloc(sizeof(struct conn_t));
     memset(conn, 0, sizeof(struct conn_t));
-    conn->net_loop = net_loop;
+    conn->net_handle = net_handle;
     conn->sock = fds[1];
     conn_nonblock(conn);
-    conn->handle_write = net_loop_pipe_write;
+    conn->handle_write = net_handle_pipe_write;
 
-    LOG(LOG_DEBUG, "sock=%d open\n", net_loop->conns[0]->sock);
-    LOG(LOG_DEBUG, "sock=%d open\n", net_loop->conns[1]->sock);
-    conn_events_add(net_loop->conns[0], CONN_EVENT_READ);
+    LOG(LOG_DEBUG, "sock=%d open\n", net_handle->conns[0]->sock);
+    LOG(LOG_DEBUG, "sock=%d open\n", net_handle->conns[1]->sock);
+    conn_events_add(net_handle->conns[0], CONN_EVENT_READ);
     return 0;
 }
 
-void net_loop_loop(struct net_loop_t *net_loop)
+void net_handle_loop(struct net_handle_t *net_handle)
 {
     struct conn_t *conn;
     struct rb_node *rb_node;
@@ -325,11 +326,11 @@ void net_loop_loop(struct net_loop_t *net_loop)
     INIT_LIST_HEAD(&task_list);
     while (1) {
         loop = 0;
-        net_loop_poll_wait(net_loop, list_empty(&net_loop->active_list) ? 100 : 0);
+        net_handle_poll_wait(net_handle, list_empty(&net_handle->active_list) ? 100 : 0);
         gettimeofday(&tv, NULL);
-        net_loop->time = tv.tv_sec * 1000  + tv.tv_usec / 1000;
-        while (!list_empty(&net_loop->active_list) && loop++ < 100) {
-            conn = d_list_head(&net_loop->active_list, struct conn_t, active_node);
+        net_handle->time = tv.tv_sec * 1000  + tv.tv_usec / 1000;
+        while (!list_empty(&net_handle->active_list) && loop++ < 100) {
+            conn = d_list_head(&net_handle->active_list, struct conn_t, active_node);
             list_del(&conn->active_node);
             conn->flags.active = 0;
             if (conn->flags.read_ready) {
@@ -343,19 +344,19 @@ void net_loop_loop(struct net_loop_t *net_loop)
                 }
             }
         }
-        pthread_mutex_lock(&net_loop->mutex);
-        list_splice_init(&net_loop->task_list, &task_list);
-        net_loop->notified = 0;
-        pthread_mutex_unlock(&net_loop->mutex);
+        pthread_mutex_lock(&net_handle->mutex);
+        list_splice_init(&net_handle->task_list, &task_list);
+        net_handle->notified = 0;
+        pthread_mutex_unlock(&net_handle->mutex);
         while (!list_empty(&task_list)) {
             task = d_list_head(&task_list, struct task_t, node);
             list_del(&task->node);
             task->handle(task);
         }
-        if (net_loop->time >= net_loop->timer_expire) {
-            while ((rb_node = rb_first(&net_loop->timer_root))) {
+        if (net_handle->time >= net_handle->timer_expire) {
+            while ((rb_node = rb_first(&net_handle->timer_root))) {
                 conn = rb_entry(rb_node, struct conn_t, timer_node);
-                if (net_loop->time >= conn->timer_expire) {
+                if (net_handle->time >= conn->timer_expire) {
                     conn_timer_del(conn);
                     conn->handle_timeout(conn);
                 } else {
@@ -363,46 +364,46 @@ void net_loop_loop(struct net_loop_t *net_loop)
                 }
             }
         }
-        if (net_loop->exit) {
+        if (net_handle->exit) {
             break;
         }
     }
 }
 
-int net_loop_post(struct net_loop_t *net_loop, struct task_t *task)
+int net_handle_post(struct net_handle_t *net_handle, struct task_t *task)
 {
     int notify;
 
-    pthread_mutex_lock(&net_loop->mutex);
-    list_add_tail(&task->node, &net_loop->task_list);
-    if (net_loop->notified) {
+    pthread_mutex_lock(&net_handle->mutex);
+    list_add_tail(&task->node, &net_handle->task_list);
+    if (net_handle->notified) {
         notify = 0;
     } else {
         notify = 1;
-        net_loop->notified = 1;
+        net_handle->notified = 1;
     }
-    pthread_mutex_unlock(&net_loop->mutex);
+    pthread_mutex_unlock(&net_handle->mutex);
     if (notify) {
-        net_loop_pipe_write(net_loop->conns[1]);
+        net_handle_pipe_write(net_handle->conns[1]);
     }
     LOG(LOG_DEBUG, "notify=%d\n", notify);
     return 0;
 }
 
-int net_loop_exit(struct net_loop_t *net_loop)
+int net_handle_exit(struct net_handle_t *net_handle)
 {
-    pthread_mutex_lock(&net_loop->mutex);
-    net_loop->exit = 1;
-    pthread_mutex_unlock(&net_loop->mutex);
+    pthread_mutex_lock(&net_handle->mutex);
+    net_handle->exit = 1;
+    pthread_mutex_unlock(&net_handle->mutex);
     return 0;
 }
 
-void net_loop_uninit(struct net_loop_t *net_loop)
+void net_handle_uninit(struct net_handle_t *net_handle)
 {
-    conn_events_del(net_loop->conns[0], CONN_EVENT_READ | CONN_EVENT_WRITE);
-    LOG(LOG_DEBUG, "sock=%d close\n", net_loop->conns[0]->sock);
-    LOG(LOG_DEBUG, "sock=%d close\n", net_loop->conns[1]->sock);
-    conn_close(net_loop->conns[0]);
-    conn_close(net_loop->conns[1]);
-    net_loop_poll_uninit(net_loop);
+    conn_events_del(net_handle->conns[0], CONN_EVENT_READ | CONN_EVENT_WRITE);
+    LOG(LOG_DEBUG, "sock=%d close\n", net_handle->conns[0]->sock);
+    LOG(LOG_DEBUG, "sock=%d close\n", net_handle->conns[1]->sock);
+    conn_close(net_handle->conns[0]);
+    conn_close(net_handle->conns[1]);
+    net_handle_poll_uninit(net_handle);
 }

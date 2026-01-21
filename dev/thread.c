@@ -3,11 +3,10 @@
 #include "net.h"
 #include "thread.h"
 
-static struct net_handle_t *net_handles = NULL;
-static struct thread_t *net_threads = NULL;
-static int net_threads_num = 0;
-static struct thread_t *task_threads = NULL;
-static int task_threads_num = 0;
+struct thread_t *net_threads = NULL;
+int net_threads_num = 1;
+struct thread_t *task_threads = NULL;
+int task_threads_num = 2;
 
 static struct list_head_t task_threads_list;
 static pthread_mutex_t task_threads_mutex;
@@ -60,9 +59,10 @@ static void *net_thread_loop(void *arg)
     return NULL;
 }
 
-int threads_init(int net_threads_num, int task_threads_num)
+int threads_init()
 {
     int i;
+    struct net_handle_t *net_handle;
 
     log_set_thread_name("main_0");
 
@@ -74,31 +74,42 @@ int threads_init(int net_threads_num, int task_threads_num)
     memset(task_threads, 0, sizeof(struct thread_t) * task_threads_num);
     for (i = 0; i < task_threads_num; i++) {
         snprintf(task_threads[i].name, sizeof(task_threads[i].name), "task_%d", i);
-        if (pthread_create(&task_threads[i].tid, NULL, task_thread_loop, &task_threads[i])) {
-            LOG(LOG_ERROR, "%s pthread_create error\n", task_threads[i].name);
-            break;
-        }
     }
     task_threads_num = i;
 
     net_threads = (struct thread_t *)mem_malloc(sizeof(struct thread_t) * net_threads_num);
     memset(net_threads, 0, sizeof(struct thread_t) * net_threads_num);
-    net_handles = (struct net_handle_t *)mem_malloc(sizeof(struct net_handle_t) * net_threads_num);
-    memset(net_handles, 0, sizeof(struct net_handle_t) * net_threads_num);
     for (i = 0; i < net_threads_num; i++) {
-        net_threads[i].data = &net_handles[i];
         snprintf(net_threads[i].name, sizeof(net_threads[i].name), "net_%d", i);
-        if (net_handle_init((struct net_handle_t *)net_threads[i].data)) {
-            LOG(LOG_ERROR, "%s net_handle_init error\n", net_threads[i].name);
+        net_handle = mem_malloc(sizeof(struct net_handle_t));
+        memset(net_handle, 0, sizeof(struct net_handle_t));
+        if (net_handle_init(net_handle)) {
+            mem_free(net_handle);
             break;
         }
+        net_threads[i].data = net_handle;
+    }
+    net_threads_num = i;
+
+    return 0;
+}
+
+int threads_run()
+{
+    int i;
+
+    for (i = 0; i < task_threads_num; i++) {
+        if (pthread_create(&task_threads[i].tid, NULL, task_thread_loop, &task_threads[i])) {
+            LOG(LOG_ERROR, "%s pthread_create error\n", task_threads[i].name);
+            break;
+        }
+    }
+    for (i = 0; i < net_threads_num; i++) {
         if (pthread_create(&net_threads[i].tid, NULL, net_thread_loop, &net_threads[i])) {
             LOG(LOG_ERROR, "%s pthread_create error\n", net_threads[i].name);
             break;
         }
     }
-    net_threads_num = i;
-
     return 0;
 }
 
@@ -107,12 +118,11 @@ int threads_uninit()
     int i;
 
     for (i = 0; i < net_threads_num; i++) {
-        net_handle_exit((struct net_handle_t *)net_threads[i].data);
+        net_handle_post((struct net_handle_t *)net_threads[i].data, NULL);
         pthread_join(net_threads[i].tid, NULL);
         net_handle_uninit((struct net_handle_t *)net_threads[i].data);
+        mem_free(net_threads[i].data);
     }
-    mem_free(net_handles);
-    net_handles = NULL;
     mem_free(net_threads);
     net_threads = NULL;
     net_threads_num = 0;

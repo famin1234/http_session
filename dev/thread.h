@@ -21,7 +21,13 @@ struct thread_t {
     void *data;
 };
 
-int threads_init(int net_threads_num, int task_threads_num);
+int threads_init();
+int threads_run();
 int threads_uninit();
+
+extern struct thread_t *net_threads;
+extern int net_threads_num;
+extern struct thread_t *task_threads;
+extern int task_threads_num;
 
 #endif

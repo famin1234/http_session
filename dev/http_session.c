@@ -1,8 +1,8 @@
 #include <stdlib.h>
 #include "mem.h"
-#include "task_thread.h"
-#include "net_thread.h"
 #include "log.h"
+#include "thread.h"
+#include "net.h"
 #include "http_header.h"
 #include "http_session.h"
 
@@ -20,12 +20,6 @@ enum http_client_state_t {
     HTTP_CLIENT_HEADER_WRITE,
     HTTP_CLIENT_BODY_WRITE,
     HTTP_CLIENT_DONE,
-};
-
-struct http_listen_task_t {
-    struct task_t task;
-    struct net_loop_t *net_loop;
-    struct conn_addr_t conn_addr;
 };
 
 struct buffer_t {
@@ -49,28 +43,26 @@ struct http_client_t {
     } flags;
 };
 
-static void http_listen_task_run(struct task_t *task);
 static int http_client_accept(struct conn_t *conn_listen);
-static int http_client_accept_timeout(struct conn_t *conn_listen);
 static void http_client_create(struct conn_t *conn);
 static int http_client_header_read(struct conn_t *conn);
 static int http_client_timeout(struct conn_t *conn);
 static int http_client_close(struct conn_t *conn, int err);
 
-int http_session_init()
+int http_session_init(const char *host, uint16_t port)
 {
     int i;
-    struct conn_addr_t conn_addr;
-    struct http_listen_task_t *http_listen_task;
+    struct conn_addr_t addr;
+    struct conn_t *conn;
 
-    if (conn_addr_pton(&conn_addr, "0.0.0.0", 8080) > 0) {
-        for (i = 0; i < net_threads_num; i++) {
-            http_listen_task = (struct http_listen_task_t *)mem_malloc(sizeof(struct http_listen_task_t));
-            http_listen_task->task.handle = http_listen_task_run;
-            http_listen_task->task.arg = http_listen_task;
-            http_listen_task->conn_addr = conn_addr;
-            http_listen_task->net_loop = &net_threads[i].net_loop;
-            net_loop_post(&net_threads[i].net_loop, &http_listen_task->task);
+    if (conn_addr_pton(&addr, host, port) != 1) {
+        LOG(LOG_DEBUG, "%s:%d is not ip\n", host, port);
+        return -1;
+    }
+    for (i = 0; i < net_threads_num; i++) {
+        if (net_handle_listen((struct net_handle_t *)net_threads[i].data, &addr, &conn) == CONN_OK) {
+            conn->handle_read = http_client_accept;
+            conn_events_add(conn, CONN_EVENT_READ);
         }
     }
     return 0;
@@ -81,47 +73,25 @@ int http_client_uninit()
     return 0;
 }
 
-static void http_listen_task_run(struct task_t *task)
-{
-    struct http_listen_task_t *http_listen_task = (struct http_listen_task_t *)task->arg;
-    int sock;
-    struct conn_t *conn;
-
-    sock = socket_listen(&http_listen_task->conn_addr);
-    if (sock > 0) {
-        conn = (struct conn_t *)mem_malloc(sizeof(struct conn_t));
-        memset(conn, 0, sizeof(struct conn_t));
-        conn->sock = sock;
-        conn->peer_addr = http_listen_task->conn_addr;
-        conn->net_loop = http_listen_task->net_loop;
-        conn_nonblock(conn);
-        conn->handle_read= http_client_accept;
-        conn_events_add(conn, CONN_EVENT_READ);
-        conn->handle_timeout= http_client_accept_timeout;
-        conn_timer_add(conn, HTTP_ACCEPT_TIMEOUT);
-    };
-    mem_free(http_listen_task);
-}
-
 static int http_client_accept(struct conn_t *conn_listen)
 {
     int sock;
     struct conn_t *conn;
-    struct conn_addr_t peer_addr;
+    struct conn_addr_t addr;
     socklen_t addrlen;
     char str[64];
 
     addrlen = sizeof(struct conn_addr_t);
-    sock = accept(conn_listen->sock, &peer_addr.addr, &addrlen);
+    sock = accept(conn_listen->sock, &addr.addr, &addrlen);
     if (sock > 0) {
-        LOG(LOG_DEBUG, "sock=%d accept=%d %s\n", conn_listen->sock, sock, conn_addr_ntop(&peer_addr, str, sizeof(str)));
+        LOG(LOG_DEBUG, "sock=%d accept=%d %s\n", conn_listen->sock, sock, conn_addr_ntop(&addr, str, sizeof(str)));
         conn_events_add(conn_listen, CONN_EVENT_READ);
 
         conn = (struct conn_t *)mem_malloc(sizeof(struct conn_t));
         memset(conn, 0, sizeof(struct conn_t));
         conn->sock = sock;
-        conn->peer_addr = peer_addr;
-        conn->net_loop = conn_listen->net_loop;
+        conn->addr = addr;
+        conn->net_handle = conn_listen->net_handle;
         http_client_create(conn);
     } else if(sock == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
         LOG(LOG_DEBUG, "sock=%d accept=%d EAGAIN\n", conn_listen->sock, sock);
@@ -134,18 +104,11 @@ static int http_client_accept(struct conn_t *conn_listen)
     return 0;
 }
 
-static int http_client_accept_timeout(struct conn_t *conn_listen)
-{
-    LOG(LOG_ERROR, "sock=%d timeout\n", conn_listen->sock);
-    conn_timer_add(conn_listen, HTTP_ACCEPT_TIMEOUT);
-    return 0;
-}
-
 static void http_client_create(struct conn_t *conn)
 {
     struct http_client_t *http_client;
 
-    conn->arg = http_client = (struct http_client_t *)mem_malloc(sizeof(struct http_client_t));
+    conn->data = http_client = (struct http_client_t *)mem_malloc(sizeof(struct http_client_t));
     memset(http_client, 0, sizeof(struct http_client_t));
     http_client->conn = conn;
     http_header_init(&http_client->http_header);
@@ -161,7 +124,7 @@ static void http_client_create(struct conn_t *conn)
 
 static int http_client_header_read(struct conn_t *conn)
 {
-    struct http_client_t *http_client = conn->arg;
+    struct http_client_t *http_client = conn->data;
     char buf[PAGE_SIZE];
     ssize_t n;
     size_t nparse;

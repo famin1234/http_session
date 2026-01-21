@@ -6,7 +6,7 @@ LDFLAGS += -lpthread
 #LDFLAGS += -static
 
 
-OBJECTS = main.c rbtree.c mem.c log.c thread.c net.c
+OBJECTS = main.c rbtree.c mem.c log.c thread.c net.c http_session.c http_parser.c http_header.c
 
 HFILES =
 
